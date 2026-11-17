@@ -519,9 +519,9 @@ function genSnow(y0, y1) {
       if (pt > 0) {
         const q = hs(tx, ty) < 0.12 ? 0.78 : 1;
         const v = n2 * 36;
-        R = mix(R, 86 * q + v, pt);
+        R = mix(R, 82 * q + v, pt);
         G = mix(G, 82 * q + v, pt);
-        B = mix(B, 100 * q + v, pt);
+        B = mix(B, 108 * q + v, pt);
       }
       const wd = cl((vn(x * 0.16, z * 0.16 + 40) - 0.6) * 3, 0, 0.4);
       R += 16 * wd;
@@ -2442,7 +2442,7 @@ function camStep(dt) {
     const dz = pz(b) - pz(a);
     const s1 = abs(dx * cY - dz * sY);
     const s2 = abs(dx * sY + dz * cY);
-    d = cl(6.5 + max(s1 * 1.05, s2 * 1.55), 10, 23);
+    d = cl(8 + max(s1 * 1.05, s2 * 1.55), 12.5, 24);
     yw = 0.14 * sin(T * 0.06);
     pt = 0.98;
     if (phase === 'ko' && PT < 0.6) {
@@ -2514,8 +2514,8 @@ function render() {
       if (!P(t1[0], t1[1], t1[2])) continue;
       const c = [_x, _y, _z];
       if (!P(h1[0], h1[1], h1[2])) continue;
-      const k = (1 - i / tr.length) * 0.75;
-      const col = sc3(f.cmb === 2 ? 0xfff0c0 : 0xd8e4ff, k);
+      const k = (1 - i / tr.length) * 0.42;
+      const col = sc3(f.cmb === 2 ? 0xffd890 : 0xa8c8ff, k);
       const col2 = sc3(col, 0.3);
       tri(a[0], a[1], a[2] + 0.02, b[0], b[1], b[2] + 0.02, c[0], c[1], c[2] + 0.02, col2, col, col, 1);
       tri(a[0], a[1], a[2] + 0.02, c[0], c[1], c[2] + 0.02, _x, _y, _z + 0.02, col2, col, col2, 1);
