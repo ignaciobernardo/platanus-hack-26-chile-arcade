@@ -249,7 +249,8 @@ function tri(ax, ay, az, bx, by, bz, cx, cy, cz, ca, cb, cc, md) {
             CG[i] += G;
             CB[i] += B;
           }
-        } else if (z > ZB[i] && BAY[ro | (x & 3)] < SDA) {
+        } else if (md > 4) SM[i] = 1;
+        else if (z > ZB[i] && BAY[ro | (x & 3)] < SDA) {
           CR[i] = R;
           CG[i] = G;
           CB[i] = B;
@@ -273,45 +274,8 @@ function tri(ax, ay, az, bx, by, bz, cx, cy, cz, ca, cb, cc, md) {
   }
 }
 
-// Triángulo de sombra: solo marca bits en la máscara (1 dura, 2 nube)
-function stri(ax, ay, bx, by, cx, cy, bit) {
-  let ar = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
-  if (ar < 0) {
-    let t = bx;
-    bx = cx;
-    cx = t;
-    t = by;
-    by = cy;
-    cy = t;
-    ar = -ar;
-  }
-  if (ar < 0.05) return;
-  const x0 = max(0, floor(min(ax, bx, cx)));
-  const x1 = min(FW - 1, ceil(max(ax, bx, cx)));
-  const y0 = max(0, floor(min(ay, by, cy)));
-  const y1 = min(FH - 1, ceil(max(ay, by, cy)));
-  if (x0 > x1 || y0 > y1) return;
-  const px = x0 + 0.5;
-  const py = y0 + 0.5;
-  let r0 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
-  let r1 = (cx - bx) * (py - by) - (cy - by) * (px - bx);
-  let r2 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
-  for (let y = y0; y <= y1; y++) {
-    let w0 = r0;
-    let w1 = r1;
-    let w2 = r2;
-    let i = y * FW + x0;
-    for (let x = x0; x <= x1; x++, i++) {
-      if (w0 >= 0 && w1 >= 0 && w2 >= 0) SM[i] |= bit;
-      w0 += ay - by;
-      w1 += by - cy;
-      w2 += cy - ay;
-    }
-    r0 += bx - ax;
-    r1 += cx - bx;
-    r2 += ax - cx;
-  }
-}
+// Triángulo de sombra: solo marca la máscara
+const stri = (ax, ay, bx, by, cx, cy) => tri(ax, ay, 0, bx, by, 0, cx, cy, 0, 0, 0, 0, 5);
 
 // Punto/disco en pantalla. md 0 opaco, 1 aditivo con caída suave, 3 trama
 function dot(sx, sy, iz, s, c, md, al = 8) {
@@ -707,11 +671,14 @@ const PYb = new Float32Array(4000);
 const PZb = new Float32Array(4000);
 const PCb = new Int32Array(4000);
 const PVb = new Uint8Array(4000);
-function drawMesh(m) {
+// sh: proyecta la malla sobre el suelo en la dirección del sol y marca su sombra
+function drawMesh(m, sh = 0) {
   const v = m.v;
   const n = m.c.length;
   for (let i = 0; i < n; i++) {
-    PVb[i] = P(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]);
+    const y = v[i * 3 + 1];
+    const k = sh ? y / LY : 0;
+    PVb[i] = P(v[i * 3] - LX * k, sh ? 0 : y, v[i * 3 + 2] - LZ * k);
     PXb[i] = _x;
     PYb[i] = _y;
     PZb[i] = _z;
@@ -726,27 +693,8 @@ function drawMesh(m) {
     const b = t[j + 1];
     const c = t[j + 2];
     if (!(PVb[a] & PVb[b] & PVb[c])) continue;
-    if (N[j] * (ex - v[a * 3]) + N[j + 1] * (ey - v[a * 3 + 1]) + N[j + 2] * (ez - v[a * 3 + 2]) <= 0) continue;
-    tri(PXb[a], PYb[a], PZb[a], PXb[b], PYb[b], PZb[b], PXb[c], PYb[c], PZb[c], PCb[a], PCb[b], PCb[c], 0);
-  }
-}
-function shadowMesh(m) {
-  const v = m.v;
-  const n = m.c.length;
-  for (let i = 0; i < n; i++) {
-    const y = v[i * 3 + 1];
-    PVb[i] = P(v[i * 3] - (LX / LY) * y, 0, v[i * 3 + 2] - (LZ / LY) * y);
-    PXb[i] = _x;
-    PYb[i] = _y;
-  }
-  const t = m.t;
-  for (let j = 0, q = 0; j < t.length; j += 3, q++) {
-    const g = m.g[q];
-    if (g >= 0 && !OB[g].al) continue;
-    const a = t[j];
-    const b = t[j + 1];
-    const c = t[j + 2];
-    if (PVb[a] & PVb[b] & PVb[c]) stri(PXb[a], PYb[a], PXb[b], PYb[b], PXb[c], PYb[c], 1);
+    if (!sh && N[j] * (ex - v[a * 3]) + N[j + 1] * (ey - v[a * 3 + 1]) + N[j + 2] * (ez - v[a * 3 + 2]) <= 0) continue;
+    tri(PXb[a], PYb[a], PZb[a], PXb[b], PYb[b], PZb[b], PXb[c], PYb[c], PZb[c], PCb[a], PCb[b], PCb[c], sh ? 5 : 0);
   }
 }
 
@@ -858,19 +806,18 @@ function genObstacles(seed) {
 
 // --- Cajas dinámicas (personajes, objetos) ---
 
-const MB = 220;
+const MB = 240;
 const BXc = new Float32Array(MB * 24);
-const BXa = new Float32Array(MB * 9);
 const BXk = new Int32Array(MB);
 const BXm = new Uint8Array(MB);
 let nB = 0;
 const FACES = [
-  [1, 3, 7, 5, 0, 1],
-  [0, 4, 6, 2, 0, -1],
-  [2, 6, 7, 3, 1, 1],
-  [0, 1, 5, 4, 1, -1],
-  [4, 5, 7, 6, 2, 1],
-  [0, 2, 3, 1, 2, -1],
+  [1, 3, 7, 5],
+  [0, 4, 6, 2],
+  [2, 6, 7, 3],
+  [0, 1, 5, 4],
+  [4, 5, 7, 6],
+  [0, 2, 3, 1],
 ];
 const ID = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
 function mR(m, ax, a) {
@@ -893,19 +840,54 @@ function mTr(m, x, y, z) {
   return r;
 }
 const mPt = (m, x, y, z) => [m[9] + x * m[0] + y * m[3] + z * m[6], m[10] + x * m[1] + y * m[4] + z * m[7], m[11] + x * m[2] + y * m[5] + z * m[8]];
-function box(m, x, y, z, hx, hy, hz, col, md = 0) {
+// Caja o tronco (ts escala la cara de arriba). md: 0 mate, 1 vidrio, 2 emisivo, 4 metal con brillo
+function box(m, x, y, z, hx, hy, hz, col, md = 0, ts = 1) {
   if (nB >= MB) return;
   const o = mPt(m, x, y, z);
   const b = nB++;
   for (let k = 0; k < 8; k++) {
-    const sx = k & 1 ? hx : -hx;
+    const t = k & 2 ? ts : 1;
+    const sx = (k & 1 ? hx : -hx) * t;
     const sy = k & 2 ? hy : -hy;
-    const sz = k & 4 ? hz : -hz;
+    const sz = (k & 4 ? hz : -hz) * t;
     for (let q = 0; q < 3; q++) BXc[b * 24 + k * 3 + q] = o[q] + sx * m[q] + sy * m[3 + q] + sz * m[6 + q];
   }
-  for (let q = 0; q < 9; q++) BXa[b * 9 + q] = m[q];
   BXk[b] = col;
   BXm[b] = md;
+}
+// Marco con -Y apuntando en la dirección (dx, dy, dz)
+function look(m, p, dx, dy, dz) {
+  const l = hypot(dx, dy, dz) || 1e-4;
+  return mR(mR(mTr(m, p[0], p[1], p[2]), 1, atan2(dx, dz)), 0, -Math.acos(cl(-dy / l, -1, 1)));
+}
+// Hueso entre dos puntos
+function seg(m, a, b, hx, hz, col, md, ts = 1) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const dz = b[2] - a[2];
+  const l = hypot(dx, dy, dz) / 2;
+  box(look(m, a, dx, dy, dz), 0, -l, 0, hx, l, hz, col, md, ts);
+}
+// Cinemática inversa de dos huesos: [codo o rodilla, extremo alcanzable]
+function ik(a, t, l1, l2, bd) {
+  let dx = t[0] - a[0];
+  let dy = t[1] - a[1];
+  let dz = t[2] - a[2];
+  const d = hypot(dx, dy, dz) || 1e-4;
+  const D = min(d, l1 + l2 - 0.002);
+  dx /= d;
+  dy /= d;
+  dz /= d;
+  const x = (D * D + l1 * l1 - l2 * l2) / (2 * D);
+  const k = bd[0] * dx + bd[1] * dy + bd[2] * dz;
+  const px = bd[0] - k * dx;
+  const py = bd[1] - k * dy;
+  const pz = bd[2] - k * dz;
+  const h = sqrt(max(0, l1 * l1 - x * x)) / (hypot(px, py, pz) || 1);
+  return [
+    [a[0] + dx * x + px * h, a[1] + dy * x + py * h, a[2] + dz * x + pz * h],
+    [a[0] + dx * D, a[1] + dy * D, a[2] + dz * D],
+  ];
 }
 const BSX = new Float32Array(8);
 const BSY = new Float32Array(8);
@@ -913,11 +895,18 @@ const BSZ = new Float32Array(8);
 function drawBoxes(shadow) {
   for (let b = 0; b < nB; b++) {
     const md = BXm[b];
-    if (shadow && md) continue;
+    if (shadow && md === 1) continue;
+    const C = b * 24;
     let ok = 1;
+    let bx = 0;
+    let by = 0;
+    let bz = 0;
     for (let k = 0; k < 8; k++) {
-      const o = b * 24 + k * 3;
+      const o = C + k * 3;
       const y = BXc[o + 1];
+      bx += BXc[o] / 8;
+      by += y / 8;
+      bz += BXc[o + 2] / 8;
       if (!(shadow ? P(BXc[o] - (LX / LY) * y, 0, BXc[o + 2] - (LZ / LY) * y) : P(BXc[o], y, BXc[o + 2]))) ok = 0;
       BSX[k] = _x;
       BSY[k] = _y;
@@ -925,23 +914,49 @@ function drawBoxes(shadow) {
     }
     if (!ok) continue;
     const dep = 1 / BSZ[0];
-    for (const f of FACES) {
-      const s = f[5];
-      const a = b * 9 + f[4] * 3;
-      const nx = BXa[a] * s;
-      const ny = BXa[a + 1] * s;
-      const nz = BXa[a + 2] * s;
-      const [p, q, r, t] = f;
+    for (const [p, q, r, t] of FACES) {
+      const a = C + p * 3;
+      const e = C + q * 3;
+      const g = C + t * 3;
+      const h = C + r * 3;
+      const ux = BXc[e] - BXc[a];
+      const uy = BXc[e + 1] - BXc[a + 1];
+      const uz = BXc[e + 2] - BXc[a + 2];
+      const wx = BXc[g] - BXc[a];
+      const wy = BXc[g + 1] - BXc[a + 1];
+      const wz = BXc[g + 2] - BXc[a + 2];
+      let nx = uy * wz - uz * wy;
+      let ny = uz * wx - ux * wz;
+      let nz = ux * wy - uy * wx;
+      const fx = (BXc[a] + BXc[h]) / 2;
+      const fy = (BXc[a + 1] + BXc[h + 1]) / 2;
+      const fz = (BXc[a + 2] + BXc[h + 2]) / 2;
+      let l = hypot(nx, ny, nz) || 1;
+      if (nx * (fx - bx) + ny * (fy - by) + nz * (fz - bz) < 0) l = -l;
+      nx /= l;
+      ny /= l;
+      nz /= l;
       if (shadow) {
         if (nx * LX + ny * LY + nz * LZ > 0) {
-          stri(BSX[p], BSY[p], BSX[q], BSY[q], BSX[r], BSY[r], 1);
-          stri(BSX[p], BSY[p], BSX[r], BSY[r], BSX[t], BSY[t], 1);
+          stri(BSX[p], BSY[p], BSX[q], BSY[q], BSX[r], BSY[r]);
+          stri(BSX[p], BSY[p], BSX[r], BSY[r], BSX[t], BSY[t]);
         }
         continue;
       }
-      const o = b * 24 + p * 3;
-      if (nx * (ex - BXc[o]) + ny * (ey - BXc[o + 1]) + nz * (ez - BXc[o + 2]) <= 0) continue;
-      const c = fogc(md === 2 ? BXk[b] : shade(BXk[b], nx, ny, nz), dep);
+      const vx = ex - fx;
+      const vy = ey - fy;
+      const vz = ez - fz;
+      if (nx * vx + ny * vy + nz * vz <= 0) continue;
+      let c = md === 2 ? BXk[b] : shade(BXk[b], nx, ny, nz);
+      if (md === 4) {
+        const vl = hypot(vx, vy, vz);
+        const hx = LX + vx / vl;
+        const hy = LY + vy / vl;
+        const hz = LZ + vz / vl;
+        const s = max(0, (nx * hx + ny * hy + nz * hz) / hypot(hx, hy, hz)) ** 12 * 190;
+        c = pk((c >> 16) + s, ((c >> 8) & 255) + s * 0.95, (c & 255) + s * 0.85);
+      }
+      c = fogc(c, dep);
       const tm = md === 1 ? 3 : 0;
       tri(BSX[p], BSY[p], BSZ[p], BSX[q], BSY[q], BSZ[q], BSX[r], BSY[r], BSZ[r], c, c, c, tm);
       tri(BSX[p], BSY[p], BSZ[p], BSX[r], BSY[r], BSZ[r], BSX[t], BSY[t], BSZ[t], c, c, c, tm);
@@ -1239,6 +1254,17 @@ const SFX = {
     tone(95, 0.25, 'sine', 0.45, 45);
   },
   jump: () => noise(0.14, 0.12, 500, 'bandpass', 0, 1500),
+  roll: () => noise(0.3, 0.22, 1400, 'bandpass', 0, 300),
+  dodge: () => tone(1320, 0.18, 'sine', 0.06, 1980),
+  charge: () => tone(180, 0.7, 'sawtooth', 0.035, 620),
+  full: () => {
+    tone(1760, 0.35, 'triangle', 0.08);
+    tone(2637, 0.5, 'sine', 0.05, 0, 0.04);
+  },
+  heavy: () => {
+    noise(0.4, 0.5, 500, 'bandpass', 0, 2600);
+    tone(110, 0.35, 'square', 0.1, 50);
+  },
   land: () => noise(0.09, 0.15, 2600, 'highpass'),
   step: () => noise(0.04, 0.03, 2200, 'highpass'),
   ice: () => {
@@ -1378,9 +1404,11 @@ function groundH(x, z) {
 function mkF(i) {
   return {
     i, x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, kx: 0, kz: 0, face: 0, hp: 100, gh: 100, gt: 0, mana: 1, sp: 0,
-    item: 0, act: 0, at: 0, cmb: 0, q: 0, hd: 0, blk: 0, bk: 0, stun: 0, frz: 0, burn: 0, bt: 0, slow: 0, rapid: 0,
-    hs: 0, inv: 0, fl: 0, fall: 0, ko: 0, kod: 0, wk: 0, mv: 0, ay: 0.2, ap: -0.45, lean: 0, trail: [], w: 0,
-    bq: 0, bqt: 0, cpu: 0, ct: 0, side: 1, skl: 0.6, lag: 1, ci: { mx: 0, mz: 0, p: [], blk: 0 }, lx: 0, lz: 0,
+    item: 0, act: 0, at: 0, cmb: 0, q: 0, hd: 0, blk: 0, stun: 0, frz: 0, burn: 0, bt: 0, slow: 0, rapid: 0,
+    hs: 0, inv: 0, fl: 0, fall: 0, ko: 0, kod: 0, wk: 0, mv: 0, trail: [], w: 0, pw: 0, pf: 0, spin: 0, rl: 0,
+    rb: 0, rx: 0, rz: 0, bst: 9, pbc: 0, gb: 0, dg: 0, aid: 0, pa: -1, plan: 0, hold: 0,
+    Q: [0.22, 0.2, 0.3, -0.25, 0.55, -0.21, 0.17, 0.25, -0.4, 0, 0, 0.05, 0.04, 0],
+    bq: 0, bqt: 0, cpu: 0, ct: 0, side: 1, skl: 0.6, lag: 1, ci: { mx: 0, mz: 0, p: [], blk: 0, hu: 0 },
   };
 }
 
@@ -1414,13 +1442,9 @@ function newRound() {
   GG.set(G0G);
   GB.set(G0B);
   for (const o of OB) stamp(o.x, o.z, o.r + 1, 112, 118, 156, 0.45);
-  FS.forEach((f, i) => {
-    Object.assign(f, {
-      x: i ? 5.5 : -5.5, z: 0, y: 0, vx: 0, vz: 0, vy: 0, kx: 0, kz: 0, face: i ? -PI / 2 : PI / 2, hp: 100, gh: 100,
-      mana: 1, sp: (RND + i) % 3, item: 0, act: 0, at: 0, blk: 0, bk: 0, stun: 0, frz: 0, burn: 0, slow: 0, rapid: 0,
-      hs: 0, inv: 0, fl: 0, fall: 0, ko: 0, kod: 0, trail: [], bq: 0, bqt: 0,
-    });
-  });
+  FS = FS.map((f, i) =>
+    Object.assign(mkF(i), { w: f.w, cpu: f.cpu, skl: f.skl, lag: f.lag, lv: f.lv, x: i ? 5.5 : -5.5, face: i ? -PI / 2 : PI / 2, sp: (RND + i) % 3 }),
+  );
   PJ = [];
   IT = [];
   BM = [];
@@ -1457,47 +1481,90 @@ function humIn(f) {
   I.mz = mz;
   for (let n = 1; n <= 6; n++) I.p[n] = hit[k + n] ? 1 : 0;
   I.blk = held[k + '2'] ? 1 : 0;
+  I.hu = held[k + '1'] ? 1 : 0;
   return I;
+}
+
+// Rodar: invulnerable durante la vuelta
+const dodging = (f) => f.act === 2 && f.at > 0.02 && f.at < 0.3;
+function dodged(f) {
+  if (f.dg > 0) return;
+  f.dg = 0.5;
+  ftxt(f.x, 2.3, f.z, '¡ESQUIVA!', PC[8]);
+  SFX.dodge();
 }
 
 function cpuIn(f, o, dt) {
   const I = f.ci;
   I.p = [];
-  f.ct -= dt;
-  if (f.ct > 0 || phase !== 'fight') {
-    if (phase !== 'fight') I.mx = I.mz = 0;
+  f.hold -= dt;
+  I.hu = f.hold > 0 ? 1 : 0;
+  if (phase !== 'fight') {
+    I.mx = I.mz = I.blk = 0;
     return I;
   }
-  f.ct = rr(0.09, 0.2) * f.lag;
   const dx = o.x - f.x;
   const dz = o.z - f.z;
   const d = hypot(dx, dz) || 1;
   const ux = dx / d;
   const uz = dz / d;
+  // ante cada ataque del rival elige: parada perfecta, rodar o cubrirse
+  const thr = (o.act === 1 || o.act === 5 || o.act > 6) && d < 3.4;
+  if (thr && f.pa !== o.aid) {
+    f.pa = o.aid;
+    const r = rnd() / f.skl;
+    f.plan = r < 0.3 ? 1 : r < 0.58 ? 2 : r < 1 ? 3 : 0;
+  }
+  if (thr && f.plan) {
+    const now = o.act === 8 || o.act === 5 || (o.act === 1 && o.at > ATA[o.cmb][0] - 0.07);
+    I.blk = f.plan === 3 || (f.plan === 1 && now) ? 1 : 0;
+    I.mx = I.mz = 0;
+    if (f.plan === 2 && now) {
+      I.p[3] = 1;
+      I.mx = -uz * f.side;
+      I.mz = ux * f.side;
+      f.plan = 0;
+    }
+    f.ct = 0.2;
+    return I;
+  }
+  f.ct -= dt;
+  if (f.ct > 0) return I;
+  f.ct = rr(0.09, 0.2) * f.lag;
+  I.blk = 0;
   const inc = PJ.find((p) => p.o !== f.i && hypot(p.x - f.x, p.z - f.z) < 5 && p.vx * (f.x - p.x) + p.vz * (f.z - p.z) > 0);
   const bomb = BM.find((b) => hypot(b.tx - f.x, b.tz - f.z) < 3) || LM.find((l) => hypot(l.x - f.x, l.z - f.z) < 1.8);
-  const oAtk = (o.act === 1 && d < 2.6) || (o.act === 2 && d < 3.2) || (o.act === 5 && d < 3);
-  I.blk = 0;
   let flee = 0;
-  if (bomb) flee = 1;
-  else if (inc && rnd() < f.skl) {
+  if (bomb) {
+    flee = 1;
+    if (rnd() < 0.3) I.p[3] = 1;
+  } else if (inc && rnd() < f.skl) {
     const r = rnd();
-    if (r < 0.35) I.p[5] = 1;
-    else if (r < 0.8) I.blk = 1;
-    else I.p[3] = 1;
-  } else if (oAtk && rnd() < f.skl) {
-    const r = rnd();
-    if (o.act === 2) I.p[r < 0.5 ? 5 : 1] = 1;
-    else if (r < 0.5) I.blk = 1;
-    else if (r < 0.75) I.p[3] = 1;
-    else I.p[1] = 1;
-  } else if (o.blk && d < 2.4 && rnd() < 0.55) I.p[3] = 1;
-  else if (f.item && rnd() < 0.3) {
+    if (r < 0.3) I.p[5] = 1;
+    else if (r < 0.65) {
+      I.p[3] = 1;
+      I.mx = -uz * f.side;
+      I.mz = ux * f.side;
+      return I;
+    } else I.blk = 1;
+  } else if ((o.stun > 0.3 || o.frz > 0.35) && d < 2.3) {
+    I.p[1] = 1;
+    f.hold = rr(0.45, 0.9);
+  } else if (o.blk && d < 2.4 && rnd() < 0.45) {
+    I.p[1] = 1;
+    f.hold = 0.95;
+  } else if (f.item && rnd() < 0.3) {
     const it = f.item;
     if ((it === 1 && f.hp < 60) || (it === 2 && d > 3 && d < 9) || it === 3 || (it === 4 && f.mana < 1.5) || (it === 5 && d < 5)) I.p[6] = 1;
   } else if (f.mana >= 1 && d > 3.2 && rnd() < 0.3) I.p[4] = 1;
-  else if (d < 2 && (o.stun > 0 || o.frz > 0 || rnd() < 0.8)) I.p[1] = 1;
-  else if (d < 2 && rnd() < 0.25) I.blk = 1;
+  else if (d < 2.1) {
+    const r = rnd();
+    if (r < 0.12) {
+      I.p[1] = 1;
+      f.hold = rr(0.3, 0.8);
+    } else if (r < 0.85) I.p[1] = 1;
+    else I.blk = 1;
+  }
   if (I.blk) f.ct = rr(0.2, 0.4);
   let tx;
   let tz;
@@ -1529,27 +1596,65 @@ function cpuIn(f, o, dt) {
 
 // --- Combate ---
 
-const ATD = [0.3, 0.3, 0.44];
-const ATA = [[0.07, 0.16], [0.07, 0.16], [0.15, 0.25]];
+const ATD = [0.3, 0.28, 0.42];
+const ATA = [
+  [0.11, 0.19],
+  [0.1, 0.18],
+  [0.14, 0.24],
+];
 const ATK = [7, 7, 12];
-const ATB = [2.5, 2.5, 8];
+const ATB = [3, 3, 8];
+const ease = (k) => k * k * (3 - 2 * k);
 
-function hurt(B, sx, sz, dmg, kb, hst, fl = 0) {
+// fl: 1 no se puede bloquear, 2 hechizo, 4 lanza al aire, 8 cuerpo a cuerpo, 16 cargado, 32 rompe la guardia
+// Devuelve 0 nada/esquivado, 1 bloqueado, 2 golpe, 3 parada perfecta
+function hurt(B, sx, sz, dmg, kb, hst, fl = 0, A = null) {
   if (B.ko || B.fall || B.inv > 0 || phase !== 'fight') return 0;
+  if (dodging(B)) {
+    dodged(B);
+    return 0;
+  }
   const dx = B.x - sx;
   const dz = B.z - sz;
   const d = hypot(dx, dz) || 1;
   const ux = dx / d;
   const uz = dz / d;
   if (!(fl & 1) && B.blk && abs(angD(B.face, atan2(-ux, -uz))) < 1.5) {
-    B.hp -= dmg * (fl & 2 ? 0.25 : 0.12);
-    B.kx += ux * kb * 0.4;
-    B.kz += uz * kb * 0.4;
-    B.hs = 0.1;
+    const sx_ = B.x + sin(B.face) * 0.5;
+    const sz_ = B.z + cos(B.face) * 0.5;
+    if (B.bst < 0.2) {
+      // parada perfecta: el atacante queda atontado, escudo y espada arriba
+      if (A) {
+        A.stun = fl & 16 ? 1.2 : 0.95;
+        A.act = 0;
+        A.hold = 0;
+        A.kx -= ux * 3;
+        A.kz -= uz * 3;
+      }
+      burst(sx_, 1.2, sz_, 30, 8, 0.45, 0.07, 0xfff4c0, 1 | 2);
+      SFX.parry();
+      HSTOP = 0.15;
+      IMP = 2;
+      ftxt(B.x, 2.6, B.z, '¡PARADA!', PC[17]);
+      return 3;
+    }
+    B.hp -= dmg * (fl & 2 ? 0.25 : fl & 16 ? 0.3 : 0.12);
+    const k = fl & 16 ? 0.85 : 0.4;
+    B.kx += ux * kb * k;
+    B.kz += uz * kb * k;
+    B.hs = 0.12;
     B.gt = 0.5;
-    burst(B.x + sin(B.face) * 0.5, 1.1, B.z + cos(B.face) * 0.5, 12, 6, 0.3, 0.07, 0xfff0d0, 1 | 2);
+    if (fl & 32) {
+      B.blk = 0;
+      B.stun = 0.75;
+      B.gb = 0.35;
+      ftxt(B.x, 2.6, B.z, '¡ROTURA!', PC[13]);
+      IMP = 2;
+      SFX.bash();
+    }
+    burst(sx_, 1.1, sz_, 12, 6, 0.3, 0.07, 0xfff0d0, 1 | 2);
     SFX.block();
-    HSTOP = 0.04;
+    HSTOP = 0.05;
     if (B.hp <= 0) ko(B, 'K.O.');
     return 1;
   }
@@ -1568,6 +1673,7 @@ function hurt(B, sx, sz, dmg, kb, hst, fl = 0) {
   B.hs = max(B.hs, hst);
   if (B.act !== 5) B.act = 0;
   B.blk = 0;
+  B.hold = 0;
   B.fl = 0.1;
   ftxt(B.x, 2.2, B.z, Math.round(dmg), PC[9]);
   burst(B.x, 1.1, B.z, 10 + dmg, 5, 0.4, 0.08, 0xffffff, 1 | 2 | 4);
@@ -1602,36 +1708,21 @@ function startAtk(f, k) {
   f.cmb = k;
   f.hd = 0;
   f.q = 0;
+  f.aid++;
   f.trail = [];
 }
 
 function melee(f, o) {
   const dx = o.x - f.x;
   const dz = o.z - f.z;
-  const d = hypot(dx, dz);
-  if (d > 2 || abs(o.y - f.y) > 1.4 || abs(angD(f.face, atan2(dx, dz))) > 1.35) return 0;
-  return 1;
-}
-
-// Desvío: el escudo en sus primeras décimas detiene golpes y devuelve hechizos
-const parrying = (o, sx, sz) => o.act === 2 && o.at < 0.17 && !o.ko && abs(angD(o.face, atan2(sx - o.x, sz - o.z))) < 1.6;
-
-function doParry(o, f) {
-  f.stun = 0.85;
-  f.act = 0;
-  o.act = 0;
-  burst((o.x + f.x) / 2, 1.2, (o.z + f.z) / 2, 26, 8, 0.4, 0.07, 0xfff4c0, 1 | 2);
-  SFX.parry();
-  HSTOP = 0.14;
-  IMP = 2;
-  ftxt(o.x, 2.5, o.z, '¡DESVÍO!', PC[17]);
+  return hypot(dx, dz) < 2.05 && abs(o.y - f.y) < 1.4 && abs(angD(f.face, atan2(dx, dz))) < 1.35;
 }
 
 function cast(f, o) {
   const k = f.sp;
   f.sp = (f.sp + 1) % 3;
   f.mana -= 1;
-  const sp = [14, 13, 8.5][k];
+  const sp = [16, 15, 10][k];
   const a = f.face;
   PJ.push({ x: f.x + sin(a) * 0.9, y: f.y + 1.1, z: f.z + cos(a) * 0.9, vx: sin(a) * sp, vz: cos(a) * sp, o: f.i, k, t: 0, r: k === 2 ? 0.65 : 0.45 });
   [SFX.ice, SFX.fire, SFX.slow][k]();
@@ -1729,7 +1820,7 @@ function land(f) {
     f.act = 6;
     f.at = 0;
     const o = FS[1 - f.i];
-    if (hypot(o.x - f.x, o.z - f.z) < 2.3 && o.y < 1) hurt(o, f.x, f.z, 11, 8, 0.4, 4);
+    if (hypot(o.x - f.x, o.z - f.z) < 2.3 && o.y < 1) hurt(o, f.x, f.z, 11, 8, 0.4, 4 | 8, f);
     for (let i = 0; i < 24; i++) {
       const a = (i / 24) * TAU;
       part(f.x + cos(a) * 0.4, 0.1, f.z + sin(a) * 0.4, cos(a) * 7, 1, sin(a) * 7, 0.4, 0.12, 0xe8ecf8, 4 | 8);
@@ -1760,10 +1851,12 @@ function upF(f, o, I, dt) {
   f.inv = max(0, f.inv - dt);
   f.slow = max(0, f.slow - dt);
   f.rapid = max(0, f.rapid - dt);
+  f.dg -= dt;
+  f.gb = max(0, f.gb - dt);
   f.gt -= dt;
   if (f.gt < 0) f.gh = max(f.hp, f.gh - 60 * dt);
   if (f.gh < f.hp) f.gh = f.hp;
-  if (phase === 'fight') f.mana = min(3, f.mana + (dt / 3.2) * (f.rapid > 0 ? 3.5 : 1));
+  if (phase === 'fight') f.mana = min(3, f.mana + (dt / 2.8) * (f.rapid > 0 ? 3.5 : 1));
   if (f.burn > 0 && !f.ko) {
     f.burn -= dt;
     f.bt -= dt;
@@ -1826,52 +1919,70 @@ function upF(f, o, I, dt) {
       const t = f.at;
       if (a === 1) {
         const [w0, w1] = ATA[f.cmb];
-        if (t >= w0 && t < w1 && !f.hd && !o.ko && melee(f, o)) {
-          f.hd = 1;
-          if (parrying(o, f.x, f.z)) doParry(o, f);
-          else hurt(o, f.x, f.z, ATK[f.cmb], ATB[f.cmb], f.cmb === 2 ? 0.42 : 0.3, f.cmb === 2 ? 4 : 0);
-        }
-        if (t >= w0 && t - adt < w0) SFX.swing();
-        if (t > 0.08 && f.bqt > 0 && f.bq === 1) {
-          f.q = 1;
-          f.bqt = 0;
-        }
-        if (f.act === 1 && ((f.q && f.cmb < 2 && t >= w1 + 0.02) || t >= ATD[f.cmb])) {
-          if (f.q && f.cmb < 2) startAtk(f, f.cmb + 1);
-          else f.act = 0;
-        }
-      } else if (a === 2) {
-        if (t > 0.16 && t < 0.36 && !f.hd && !o.ko) {
-          const dx = o.x - f.x;
-          const dz = o.z - f.z;
-          if (hypot(dx, dz) < 1.45 && abs(angD(f.face, atan2(dx, dz))) < 1.1 && abs(o.y - f.y) < 1.2) {
-            f.hd = 1;
-            if (parrying(o, f.x, f.z)) {
-              o.kx -= sin(f.face) * 6;
-              f.kx -= sin(f.face) * 6;
-              SFX.block();
-            } else if (o.blk) {
-              o.blk = 0;
-              hurt(o, f.x, f.z, 6, 9, 0, 1);
-              o.stun = 0.95;
-              ftxt(o.x, 2.5, o.z, '¡ROTURA!', PC[13]);
-              IMP = 2;
-              SFX.bash();
-            } else {
-              hurt(o, f.x, f.z, 8, 9, 0.4, 0);
-              SFX.bash();
+        if (t >= w0 && t - adt < w0) {
+          if (I.hu && f.cmb < 2) {
+            // mantener el botón: cargar
+            f.act = 7;
+            f.at = 0;
+            f.pw = 0;
+            f.pf = 0;
+            SFX.charge();
+          } else {
+            SFX.swing();
+            if (hypot(o.x - f.x, o.z - f.z) > 1.3) {
+              f.kx += sin(f.face) * 3;
+              f.kz += cos(f.face) * 3;
             }
-            f.at = max(f.at, 0.36);
           }
         }
-        if (t > (f.hd ? 0.5 : 0.62)) f.act = 0;
+        if (f.act === 1) {
+          if (t >= w0 && t < w1 && !f.hd && !o.ko && melee(f, o)) {
+            f.hd = 1;
+            hurt(o, f.x, f.z, ATK[f.cmb], ATB[f.cmb], f.cmb === 2 ? 0.42 : 0.3, 8 | (f.cmb === 2 ? 4 : 0), f);
+          }
+          if (t > 0.08 && f.bqt > 0 && f.bq === 1) {
+            f.q = 1;
+            f.bqt = 0;
+          }
+          if ((f.q && f.cmb < 2 && t >= w1 + 0.02) || t >= ATD[f.cmb]) {
+            if (f.q && f.cmb < 2) startAtk(f, f.cmb + 1);
+            else f.act = 0;
+          }
+        }
+      } else if (a === 7) {
+        f.pw = min(1, t / 0.7);
+        if (f.pw >= 1 && !f.pf) {
+          f.pf = 1;
+          SFX.full();
+          if (f.tip) burst(f.tip[0], f.tip[1], f.tip[2], 16, 3, 0.4, 0.06, 0xfff0c0, 1);
+        }
+        if (f.tip && rnd() < 0.6) part(f.tip[0], f.tip[1], f.tip[2], rr(-1, 1), rr(0, 1.5), rr(-1, 1), 0.3, 0.05, f.pf ? 0xfff0c0 : 0x9fb8ff, 1);
+        if (!I.hu || t > 2) {
+          f.act = 8;
+          f.at = 0;
+          f.hd = 0;
+          f.aid++;
+          f.trail = [];
+          SFX.heavy();
+        }
+      } else if (a === 8) {
+        f.spin = TAU * ease(cl((t - 0.03) / 0.27, 0, 1));
+        if (t > 0.05 && t < 0.3 && !f.hd && !o.ko && hypot(o.x - f.x, o.z - f.z) < 2.4 && abs(o.y - f.y) < 1.4) {
+          f.hd = 1;
+          const p = f.pw;
+          hurt(o, f.x, f.z, 9 + 12 * p, 8 + 9 * p, 0.45, 8 | 16 | 4 | (p >= 1 ? 32 : 0), f);
+        }
+        if (t > 0.55) f.act = 0;
+      } else if (a === 2) {
+        f.rl = (f.rb ? -TAU : TAU) * ease(cl(t / 0.4, 0, 1));
+        if (t > 0.48) f.act = 0;
       } else if (a === 3) {
-        if (t >= 0.15 && t - adt < 0.15) cast(f, o);
-        if (t > 0.32) f.act = 0;
+        if (t >= 0.13 && t - adt < 0.13) cast(f, o);
+        if (t > 0.28) f.act = 0;
       } else if (a === 4) {
         if (t >= 0.12 && t - adt < 0.12) useItem(f, o);
         if (t > 0.3) f.act = 0;
-      } else if (a === 6 && t > 0.28) f.act = 0;
+      } else if (a === 6 && t > 0.24) f.act = 0;
     }
     if (!f.act && f.bqt > 0) {
       const b = f.bq;
@@ -1880,18 +1991,30 @@ function upF(f, o, I, dt) {
         else {
           f.act = 5;
           f.at = 0;
+          f.aid++;
           f.vy = -15;
           SFX.swing();
         }
       } else if (b === 3 && onG) {
+        // rodar hacia donde apunta el stick; sin dirección, voltereta hacia atrás
+        let rx = I.mx;
+        let rz = I.mz;
+        f.rb = !(rx || rz);
+        if (f.rb) {
+          rx = -sin(f.face);
+          rz = -cos(f.face);
+        } else f.face = atan2(rx, rz);
+        f.rx = rx;
+        f.rz = rz;
         f.act = 2;
         f.at = 0;
-        f.hd = 0;
+        burst(f.x, 0.05, f.z, 10, 2.5, 0.5, 0.1, 0xe4e8f6, 2 | 8, 1);
+        SFX.roll();
       } else if (b === 4 && f.mana >= 1) {
         f.act = 3;
         f.at = 0;
       } else if (b === 5 && onG) {
-        f.vy = 8.6;
+        f.vy = 9.2;
         onG = false;
         burst(f.x, 0.05, f.z, 8, 2, 0.4, 0.1, 0xe4e8f6, 2 | 8, 1);
         SFX.jump();
@@ -1902,23 +2025,31 @@ function upF(f, o, I, dt) {
       }
       if (f.act) f.bqt = 0;
     }
-    f.blk = !f.act && onG && I.blk ? 1 : 0;
+    // escudo: la parada perfecta solo vale en las primeras décimas, y no si se machaca el botón
+    const nb = !f.act && onG && I.blk ? 1 : 0;
+    if (nb && !f.blk) f.bst = f.pbc > 0 ? 9 : 0;
+    if (!nb && f.blk) f.pbc = 0.3;
+    f.blk = nb;
   } else {
     f.blk = 0;
     if (f.frz > 0 || f.stun > 0 || f.ko) f.act = f.act === 5 ? 5 : 0;
   }
-  let sp = 5.3 * (f.slow > 0 ? 0.55 : 1);
+  f.bst += dt;
+  f.pbc -= dt;
+  let sp = 6.4 * (f.slow > 0 ? 0.55 : 1);
   if (busy) sp = 0;
-  else if (f.blk) sp *= 0.36;
-  else if (f.act === 1) sp *= 0.22;
+  else if (f.blk) sp *= 0.35;
+  else if (f.act === 1) sp *= 0.25;
   else if (f.act === 3 || f.act === 4) sp *= 0.3;
-  else if (f.act === 2 || f.act === 6) sp = 0;
-  const ac = 1 - exp(-(onG ? 26 : 5) * dt);
+  else if (f.act === 7) sp *= 0.12;
+  else if (f.act === 6 || f.act === 8) sp = 0;
+  const ac = 1 - exp(-(onG ? 30 : 5) * dt);
   f.vx += (I.mx * sp - f.vx) * ac;
   f.vz += (I.mz * sp - f.vz) * ac;
-  if (f.act === 2 && f.at > 0.16 && f.at < 0.36) {
-    f.vx = sin(f.face) * 10;
-    f.vz = cos(f.face) * 10;
+  if (f.act === 2) {
+    const v = (f.at < 0.28 ? 10.5 : f.at < 0.42 ? mix(10.5, 0, (f.at - 0.28) / 0.14) : 0) * sl;
+    f.vx = f.rx * v;
+    f.vz = f.rz * v;
     if (rnd() < 0.5) part(f.x, 0.1, f.z, rr(-1, 1), 1, rr(-1, 1), 0.4, 0.1, 0xe4e8f6, 2 | 8);
   }
   const kd = exp(-(onG ? 4.2 : 0.7) * dt);
@@ -1928,7 +2059,7 @@ function upF(f, o, I, dt) {
   const oz = f.z;
   f.x += (f.vx + f.kx) * dt;
   f.z += (f.vz + f.kz) * dt;
-  f.vy -= (f.act === 5 ? 50 : 26) * dt;
+  f.vy -= (f.act === 5 ? 60 : 30) * dt;
   f.y += f.vy * dt;
   const gh = groundH(f.x, f.z);
   if (f.y <= gh) {
@@ -1958,8 +2089,7 @@ function upF(f, o, I, dt) {
   }
   // borde de la meseta: solo se cae si te lanzan
   const r = hypot(f.x, f.z);
-  const ra = atan2(f.z, f.x);
-  const lim = rad(ra) - 0.45;
+  const lim = rad(atan2(f.z, f.x)) - 0.45;
   const kv = hypot(f.kx, f.kz);
   if (r > lim) {
     if (kv > 5.5 || f.y > gh + 0.3 || f.ko) {
@@ -1979,105 +2109,164 @@ function upF(f, o, I, dt) {
     }
   }
   // mirar al rival
-  if (!busy && f.act !== 2 && f.act !== 1) {
+  if (!busy && f.act !== 2 && f.act !== 1 && f.act !== 8) {
     const tgt = !o.ko && !o.fall ? atan2(o.x - f.x, o.z - f.z) : hypot(f.vx, f.vz) > 0.5 ? atan2(f.vx, f.vz) : f.face;
-    f.face += cl(angD(f.face, tgt), -14 * dt, 14 * dt);
-  } else if (f.act === 1 && f.at < 0.06 && !o.ko) f.face += cl(angD(f.face, atan2(o.x - f.x, o.z - f.z)), -8 * dt, 8 * dt);
-  // animación
-  const mv = hypot(f.x - ox, f.z - oz) / dt;
-  f.mv = mix(f.mv, min(1, mv / 5), 0.2);
-  const pw = f.wk;
-  f.wk += mv * dt * 2.3;
-  if (onG && floor(pw / PI) !== floor(f.wk / PI) && mv > 1) {
+    const tr = (f.act === 7 ? 6 : 15) * dt;
+    f.face += cl(angD(f.face, tgt), -tr, tr);
+  } else if (f.act === 1 && f.at < 0.08 && !o.ko) f.face += cl(angD(f.face, atan2(o.x - f.x, o.z - f.z)), -9 * dt, 9 * dt);
+  // pasos
+  const mvv = hypot(f.x - ox, f.z - oz) / dt;
+  f.mv = mix(f.mv, min(1, mvv / 6.4), 0.2);
+  const pwk = f.wk;
+  f.wk += mvv * dt * 1.9;
+  if (onG && floor(pwk / PI) !== floor(f.wk / PI) && mvv > 1 && f.act !== 2) {
     const s = floor(f.wk / PI) & 1 ? 1 : -1;
     stamp(f.x + cos(f.face) * 0.14 * s, f.z - sin(f.face) * 0.14 * s, 0.11, 120, 128, 168, 0.55);
     if (!f.cpu) SFX.step();
     part(f.x, 0.05, f.z, rr(-0.5, 0.5), 0.8, rr(-0.5, 0.5), 0.35, 0.06, 0xe8ecf8, 2 | 8);
   }
-  let ay = 0.25;
-  let ap = -0.45 + sin(T * 2.2 + f.i) * 0.05;
-  let lean = f.hs > 0 ? -0.25 : f.mv * 0.12;
-  if (f.act === 1) {
+  // pose objetivo: mano de la espada (xyz), hoja (rumbo, alzada), mano del escudo (xyz),
+  // normal del escudo (rumbo, alzada), giro e inclinación del torso, agachado, cabeza
+  const br = sin(T * 2.2 + f.i);
+  const run = sin(f.wk) * f.mv;
+  let A = [0.22, 0.2 + br * 0.015, 0.3 + run * 0.1, -0.25, 0.55, -0.21, 0.17, 0.25 - run * 0.08, -0.4, 0, run * 0.12, 0.05 + f.mv * 0.14, 0.04 + br * 0.01, 0];
+  let fast = 0;
+  const t = f.at;
+  if (f.ko) A = [0.5, 0.15, 0.15, 1.2, -0.2, -0.5, 0.15, 0.1, -1.4, 0.4, 0, -0.1, 0, -0.3];
+  else if (f.gb > 0) A = [0.45, 0.6, -0.1, 0.6, 1, -0.62, 0.55, -0.2, -1.9, 0.3, -0.3, -0.3, 0, -0.3];
+  else if (f.stun > 0) {
+    const w = sin(T * 7);
+    A = [0.3, 0.98 + w * 0.04, 0.02, 0.3, 1.45, -0.32, 0.92 - w * 0.04, 0.08, -0.5, 0.9, w * 0.15, -0.12, 0, w * 0.25];
+  } else if (f.hs > 0) A = [0.36, 0.25, 0.08, 0.6, 0.2, -0.36, 0.25, 0.08, -0.9, 0, 0, -0.32, 0.04, -0.3];
+  else if (f.act === 1) {
     const [w0, w1] = ATA[f.cmb];
-    const t = f.at;
-    const k = cl((t - w0) / (w1 - w0), 0, 1);
-    const e = k * k * (3 - 2 * k);
+    const k = t < w0 ? t / w0 - 1 : cl((t - w0) / (w1 - w0), 0, 1);
+    fast = 1;
     if (f.cmb === 2) {
-      ap = t < w0 ? mix(-0.6, -3, t / w0) : mix(-3, -0.35, e);
-      ay = 0;
+      const ph = k < 0 ? mix(0.4, 2.5, k + 1) : mix(2.5, -0.75, ease(k));
+      A = [0.06, 0.45 + 0.45 * sin(ph), 0.05 + 0.45 * cos(ph), 0, ph, -0.18, 0.3, 0.18, -0.6, 0, 0, k < 0 ? -0.12 : 0.3 * k, k < 0 ? 0 : 0.14 * k, 0];
     } else {
-      const s0 = f.cmb ? -1.2 : 1.6;
-      ap = -1.45;
-      ay = t < w0 ? mix(0.3, s0, t / w0) : mix(s0, -s0 * 0.85, e);
+      const s0 = f.cmb ? -1.6 : 1.9;
+      const s1 = f.cmb ? 1.5 : -1.3;
+      const th = k < 0 ? mix(0.3, s0, k + 1) : mix(s0, s1, ease(k));
+      A = [sin(th) * 0.46, f.cmb ? 0.5 : 0.42, cos(th) * 0.46 + 0.05, th, 0.08, -0.16, 0.32, 0.16, -0.6, 0, th * 0.35, k < 0 ? 0 : 0.15 * k, 0.06, 0];
     }
-    lean = 0.18 * e;
-  } else if (f.act === 3) {
-    ap = -1.55;
-    ay = 0.05;
-  } else if (f.act === 4) ap = mix(-2.8, -0.8, cl(f.at / 0.16, 0, 1));
-  else if (f.act === 2) {
-    ap = -0.7;
-    lean = 0.3;
-  } else if (f.act === 5) {
-    ap = -2.6;
-    ay = 0;
-  }
-  if (f.stun > 0) ay = sin(T * 9) * 0.6;
-  if (phase === 'end' && f.i === winner) {
-    ap = -3 + sin(T * 3) * 0.1;
-    ay = 0;
-    lean = -0.1;
+  } else if (f.act === 7) {
+    const p = f.pw;
+    A = [0.42, 0.55, -0.3, 2.5, 0.35 + p * 0.3, -0.25, 0.35, 0.3, -0.2, 0, 0.7, 0.1, 0.12 + p * 0.1, 0];
+  } else if (f.act === 8) {
+    fast = 1;
+    A = [0.5, 0.38, 0.2, 1.35, -0.05, -0.36, 0.3, 0.05, -1.4, 0, 0, 0.12, 0.1, 0];
+  } else if (f.act === 2) A = [0.18, 0.15, 0.25, 0.8, -0.3, -0.2, 0.15, 0.2, -0.4, 0, 0, 0.2, 0.3, 0.3];
+  else if (f.act === 3) A = [0.12, 0.45, 0.52, 0, 0.12, -0.28, 0.42, 0.3, -0.2, -0.6, 0, 0.1, 0.06, 0];
+  else if (f.act === 4) {
+    const k = cl(t / 0.14, 0, 1);
+    fast = 1;
+    A = [0.22, mix(1, 0.35, k), mix(-0.25, 0.5, k), 0, mix(1.8, -0.2, k), -0.25, 0.3, 0.2, -0.5, 0, mix(0.4, -0.3, k), mix(-0.2, 0.25, k), 0.05, 0];
+  } else if (f.act === 5) A = [0.08, 0.35, 0.35, 0, -1.35, -0.25, 0.4, 0.15, -0.6, 0, 0, 0.2, 0.2, 0.2];
+  else if (f.act === 6) A = [0.15, 0.1, 0.4, 0, -1.2, -0.25, 0.2, 0.2, -0.6, 0, 0, 0.35, 0.3, 0.2];
+  else if (f.blk) A = [0.27, 0.12, 0.04, 0.35, 1.25, -0.02, 0.36, 0.38, 0, 0.05, -0.2, 0.12, 0.12, 0.05];
+  else if (phase === 'end' && f.i === winner) A = [0.16, 1.05, 0.12, 0, 1.5, -0.3, 0.1, 0.1, -1.2, 0, 0, -0.08, 0, -0.15];
+  else if (!onG) {
+    A[1] += 0.18;
+    A[6] += 0.18;
   }
   if (f.frz <= 0) {
-    const k = 1 - exp(-28 * dt);
-    f.ay = mix(f.ay, ay, k);
-    f.ap = mix(f.ap, ap, k);
-    f.lean = mix(f.lean, lean, k);
-    f.bk = mix(f.bk, f.blk ? 1 : f.act === 2 ? 1.4 : 0, 1 - exp(-30 * dt));
+    const k = 1 - exp(-(fast ? 60 : 24) * dt);
+    for (let i = 0; i < 14; i++) f.Q[i] += (A[i] - f.Q[i]) * k;
   }
 }
 
-// Construye las cajas del personaje y guarda la punta de la espada
+// Caballero articulado: piernas y brazos por cinemática inversa, armadura con brillo metálico
 function pose(f) {
   if (f.fall === 2 || (f.fall && f.y < -14)) return;
   if (f.inv > 0 && (T * 20) & 1) return;
-  let m = ID.slice();
-  m[9] = f.x;
-  m[10] = f.y;
-  m[11] = f.z;
-  m = mR(m, 1, f.face);
-  m = f.ko ? mR(m, 0, -f.kod * 1.45) : mR(m, 0, f.lean);
-  const wh = f.fl > 0 ? 2 : 0;
-  const c1 = wh ? 0xffffff : PCOL[f.i];
-  const c2 = wh ? 0xffffff : PCOL2[f.i];
-  const dk = wh ? 0xffffff : f.frz > 0 ? 0x6080a0 : DK;
-  const air = f.y > groundH(f.x, f.z) + 0.05 && !f.ko;
-  const sw = sin(f.wk) * 0.75 * f.mv;
-  box(mR(mTr(m, -0.13, 0.84, 0), 0, air ? -0.7 : sw), 0, -0.42, 0, 0.085, 0.42, 0.1, dk, wh);
-  box(mR(mTr(m, 0.13, 0.84, 0), 0, air ? 0.4 : -sw), 0, -0.42, 0, 0.085, 0.42, 0.1, dk, wh);
-  box(m, 0, 0.8, -0.02, 0.27, 0.3, 0.21, c1, wh);
-  box(m, 0, 1.22, 0, 0.22, 0.2, 0.15, dk, wh);
-  box(m, 0, 1.44, 0, 0.21, 0.05, 0.17, c2, wh);
-  box(m, 0, 1.63, 0.01, 0.15, 0.15, 0.15, dk, wh);
-  box(m, 0, 1.8, -0.04, 0.11, 0.05, 0.11, c1, wh);
-  box(mR(mTr(m, 0.1, 1.42, -0.14), 0, 0.5 + 0.35 * sin(T * 11 + f.i)), 0, 0, -0.22, 0.06, 0.025, 0.22, c2, wh);
-  let a = mR(mR(mTr(m, 0.3, 1.38, 0), 1, f.ay), 0, f.ap);
-  box(a, 0, -0.22, 0, 0.065, 0.22, 0.065, dk, wh);
-  box(a, 0, -0.46, 0, 0.12, 0.025, 0.045, dk, wh);
-  box(a, 0, -0.98, 0, 0.022, 0.52, 0.06, wh ? 0xffffff : 0xdfe4f2, f.act === 3 ? 2 : wh);
-  const tip = mPt(a, 0, -1.5, 0);
-  const hand = mPt(a, 0, -0.5, 0);
-  if (f.act === 1 || f.act === 5) {
-    f.trail.unshift([hand, tip]);
-    if (f.trail.length > 6) f.trail.pop();
+  const Q = f.Q;
+  let B = mR(mTr(ID, f.x, f.y, f.z), 1, f.face + (f.act === 8 ? f.spin : 0));
+  if (f.ko) B = mR(B, 0, -f.kod * 1.45);
+  if (f.act === 2) B = mTr(mR(mTr(B, 0, 0.5, 0), 0, f.rl), 0, -0.5, 0);
+  const wh = f.fl > 0;
+  const WH = 0xffffff;
+  const mt = wh ? 2 : 4;
+  const mc = wh ? 2 : 0;
+  const ST = wh ? WH : f.frz > 0 ? 0xa8d8f0 : 0x9aa2bc;
+  const c1 = wh ? WH : PCOL[f.i];
+  const c2 = wh ? WH : PCOL2[f.i];
+  const dk = wh ? WH : DK;
+  const gd = wh ? WH : 0xb89a5c;
+  const air = (f.y > groundH(f.x, f.z) + 0.05 && !f.ko) || f.act === 2;
+  const hy = 0.93 - Q[12] - (air ? 0 : abs(sin(f.wk)) * 0.05 * f.mv);
+  const cf = cos(f.face);
+  const sf = sin(f.face);
+  const v = hypot(f.vx, f.vz) || 1;
+  const lx = (f.vx * cf - f.vz * sf) / v;
+  const lz = (f.vx * sf + f.vz * cf) / v;
+  const st = sin(f.wk) * 0.3 * f.mv;
+  const lf = cos(f.wk) * 0.17 * f.mv;
+  const wd = f.blk || f.act > 6 ? 0.07 : 0;
+  for (const q of [-1, 1]) {
+    const ft = air ? [q * 0.13, 0.42, 0.1] : [q * (0.13 + wd) + lx * st * q, max(0, lf * q), -q * (0.11 + wd) + lz * st * q];
+    const hp = [q * 0.1, hy, 0];
+    const [kn, an] = ik(hp, ft, 0.47, 0.47, [q * 0.15, 0, 1]);
+    seg(B, hp, kn, 0.075, 0.085, dk, mc, 1.15);
+    seg(B, kn, an, 0.062, 0.07, ST, mt, 1.15);
+    box(B, kn[0], kn[1], kn[2] + 0.06, 0.05, 0.055, 0.03, ST, mt);
+    box(B, an[0], an[1] + 0.04, an[2] + 0.05, 0.06, 0.04, 0.12, ST, mt, 0.8);
+  }
+  const Pm = mTr(B, 0, hy, 0);
+  box(Pm, 0, 0, 0, 0.15, 0.08, 0.1, dk, mc);
+  box(Pm, 0, -0.15, 0, 0.19, 0.13, 0.14, c1, mc, 0.75);
+  const Tm = mR(mR(mTr(Pm, 0, 0.05, 0), 1, Q[10]), 0, Q[11]);
+  box(Tm, 0, 0.12, 0, 0.13, 0.1, 0.095, dk, mc);
+  box(Tm, 0, 0.03, 0, 0.15, 0.035, 0.11, gd, mt);
+  box(Tm, 0, 0.36, 0.01, 0.15, 0.14, 0.11, ST, mt, 1.32);
+  box(Tm, 0, 0.53, 0, 0.08, 0.04, 0.08, ST, mt);
+  for (const q of [-1, 1]) box(mR(mTr(Tm, q * 0.25, 0.5, 0), 2, -q * 0.4), 0, 0, 0, 0.1, 0.07, 0.12, ST, mt, 0.6);
+  // capa
+  const ca = 0.1 + f.mv * 0.6 + sin(T * 5 + f.i) * 0.05;
+  const k1 = mR(mTr(Tm, 0, 0.5, -0.13), 0, ca);
+  box(k1, 0, -0.27, 0, 0.16, 0.27, 0.015, c1, mc, 0.8);
+  box(mR(mTr(k1, 0, -0.54, 0), 0, ca * 0.5), 0, -0.2, 0, 0.2, 0.2, 0.014, c1, mc, 0.92);
+  // yelmo con visera y penacho
+  const Hm = mR(mTr(Tm, 0, 0.59, 0.01), 0, Q[13]);
+  box(Hm, 0, 0.13, 0, 0.115, 0.14, 0.125, ST, mt, 0.82);
+  box(Hm, 0, 0.14, 0.126, 0.086, 0.014, 0.006, wh ? WH : 0x0b0e1a, 2);
+  let pl = mTr(Hm, 0, 0.27, 0.04);
+  for (let i = 0; i < 3; i++) {
+    pl = mR(pl, 0, (i ? -0.45 : 0.25) - 0.1 * sin(T * 7 + i + f.mv * 3));
+    box(pl, 0, 0.02, -0.06, 0.024, 0.05, 0.075, c2, 2);
+    pl = mTr(pl, 0, 0, -0.12);
+  }
+  f.eyes = [mPt(Hm, -0.04, 0.14, 0.14), mPt(Hm, 0.04, 0.14, 0.14)];
+  // brazos
+  const SR = [0.25, 0.47, 0];
+  const SL = [-0.25, 0.47, 0];
+  const [eR, aR] = ik(SR, [Q[0], Q[1], Q[2]], 0.28, 0.27, [0.8, -0.3, -0.6]);
+  const [eL, aL] = ik(SL, [Q[5], Q[6], Q[7]], 0.28, 0.27, [-0.8, -0.3, -0.6]);
+  seg(Tm, SR, eR, 0.055, 0.06, dk, mc, 1.1);
+  seg(Tm, eR, aR, 0.05, 0.055, ST, mt, 1.3);
+  seg(Tm, SL, eL, 0.055, 0.06, dk, mc, 1.1);
+  seg(Tm, eL, aL, 0.05, 0.055, ST, mt, 1.3);
+  // espada
+  const G = look(Tm, aR, sin(Q[3]) * cos(Q[4]), sin(Q[4]), cos(Q[3]) * cos(Q[4]));
+  box(G, 0, 0, 0, 0.05, 0.05, 0.05, dk, mc);
+  box(G, 0, 0.1, 0, 0.02, 0.07, 0.02, dk, mc);
+  box(G, 0, -0.06, 0, 0.12, 0.02, 0.035, gd, mt);
+  const lit = wh || (f.act === 7 && f.pw >= 1);
+  box(G, 0, -0.58, 0, 0.042, 0.5, 0.011, lit ? 0xfff4d8 : 0xdfe4f2, lit ? 2 : mt, 1.2);
+  const tip = mPt(G, 0, -1.08, 0);
+  if (f.act === 1 || f.act === 5 || f.act === 8) {
+    f.trail.unshift([mPt(G, 0, -0.55, 0), tip]);
+    if (f.trail.length > 5) f.trail.pop();
   } else f.trail = [];
   f.tip = tip;
-  const bk = f.bk;
-  const s = mR(mTr(m, mix(-0.4, 0, min(1, bk)), mix(0.95, 1.12, min(1, bk)), mix(0.04, 0.45, bk)), 1, mix(-PI / 2, 0, min(1, bk)));
-  box(mR(mR(mTr(m, -0.3, 1.38, 0), 0, mix(-0.2, -1.2, min(1, bk))), 1, mix(0, -0.5, min(1, bk))), 0, -0.2, 0, 0.065, 0.2, 0.065, dk, wh);
-  box(s, 0, 0, 0, 0.25, 0.3, 0.045, wh ? 0xffffff : f.act === 2 && f.at < 0.17 ? 0xfff6d8 : 0xe8c4a8, wh || (f.act === 2 && f.at < 0.17) ? 2 : 0);
-  box(s, 0, 0, 0.05, 0.08, 0.08, 0.03, c1, wh);
-  if (f.frz > 0) box(mTr(ID, f.x, f.y, f.z), 0, 0.95, 0, 0.5, 1.02, 0.5, 0xc8f2ff, 1);
+  // escudo de cometa; brilla mientras dura la ventana de parada perfecta
+  const Sm = mR(mR(mTr(Tm, aL[0], aL[1], aL[2]), 1, Q[8]), 0, -Q[9]);
+  const pb = f.blk && f.bst < 0.2;
+  box(Sm, 0, -0.04, 0.06, 0.16, 0.3, 0.03, pb ? 0xfff4d8 : c1, pb ? 2 : mc, 1.65);
+  box(Sm, 0, 0.27, 0.075, 0.27, 0.03, 0.03, ST, mt);
+  box(Sm, 0, 0.02, 0.1, 0.06, 0.06, 0.03, ST, mt);
+  if (f.frz > 0) box(mTr(ID, f.x, f.y, f.z), 0, 0.95, 0, 0.5, 1.05, 0.5, 0xc8f2ff, 1);
 }
 
 function itemBoxes(t) {
@@ -2231,7 +2420,11 @@ function step(dt) {
     for (const f of FS) {
       if (end || f.i === p.o || f.ko || f.fall) continue;
       if (hypot(f.x - p.x, f.z - p.z) < p.r + 0.35 && p.y > f.y - 0.2 && p.y < f.y + 1.9) {
-        if (parrying(f, p.x, p.z)) {
+        if (dodging(f)) {
+          dodged(f);
+          continue;
+        }
+        if (f.blk && f.bst < 0.2 && abs(angD(f.face, atan2(p.x - f.x, p.z - f.z))) < 1.5) {
           p.o = f.i;
           p.vx = -p.vx * 1.25;
           p.vz = -p.vz * 1.25;
@@ -2239,7 +2432,6 @@ function step(dt) {
           SFX.parry();
           HSTOP = 0.08;
           ftxt(f.x, 2.5, f.z, '¡DEVUELTO!', PC[17]);
-          f.act = 0;
           continue;
         }
         const r = hurt(f, p.x - p.vx, p.z - p.vz, [6, 5, 4][p.k], 3, 0.25, 2);
@@ -2483,7 +2675,7 @@ function render() {
     box(m, 0, 0, 0, 0.18, 0.18, 0.18, 0x30303c);
   }
   // sombras: obstáculos, cajas, nubes y cóndor
-  shadowMesh(OBM);
+  drawMesh(OBM, 1);
   drawBoxes(1);
   if (COND) condor(1);
   floorPass();
@@ -2496,7 +2688,7 @@ function render() {
   for (const b of BOLT) glow(b.x, b.z, 3.2, sc3(0xfff0c0, b.t * 1.6));
   for (const f of FS) {
     if (f.burn > 0 && !f.fall) glow(f.x, f.z, 1.6, sc3(0xff7020, 0.3));
-    if (f.act === 3 || (f.act === 2 && f.at < 0.17)) glow(f.x, f.z, 1.4, f.act === 3 ? sc3(SPC[f.sp], 0.3) : 0x504030);
+    if (f.act === 3 || f.act === 7) glow(f.x, f.z, 1.4, f.act === 3 ? sc3(SPC[f.sp], 0.3) : sc3(f.pw >= 1 ? 0xfff0c0 : 0x9fb8ff, 0.12 + f.pw * 0.2));
   }
   drawMesh(WALL);
   drawMesh(OBM);
@@ -2514,7 +2706,7 @@ function render() {
       if (!P(t1[0], t1[1], t1[2])) continue;
       const c = [_x, _y, _z];
       if (!P(h1[0], h1[1], h1[2])) continue;
-      const k = (1 - i / tr.length) * 0.42;
+      const k = (1 - i / tr.length) * 0.3;
       const col = sc3(f.cmb === 2 ? 0xffd890 : 0xa8c8ff, k);
       const col2 = sc3(col, 0.3);
       tri(a[0], a[1], a[2] + 0.02, b[0], b[1], b[2] + 0.02, c[0], c[1], c[2] + 0.02, col2, col, col, 1);
@@ -2529,19 +2721,19 @@ function render() {
     dot(_x, _y, _z + 0.05, s * 1.5, SPC[p.k], 1);
     dot(_x, _y, _z + 0.05, s * 0.8, 0xffffff, 1);
   }
-  // ojos que brillan bajo la capucha
+  // ojos que brillan tras la visera, espada cargada y estrellas del aturdido
   for (const f of FS) {
-    if (f.fall === 2 || f.ko) continue;
-    const fx = sin(f.face);
-    const fz = cos(f.face);
-    for (const s of [-1, 1]) {
-      if (P(f.x + fx * 0.17 + fz * 0.06 * s, f.y + 1.65, f.z + fz * 0.17 - fx * 0.06 * s)) dot(_x, _y, _z, 1, f.frz > 0 ? 0x8ff0ff : PCOL2[f.i], 1);
+    if (f.fall === 2 || f.ko || !f.eyes) continue;
+    for (const e of f.eyes) if (P(e[0], e[1], e[2])) dot(_x, _y, _z + 0.05, 1, f.frz > 0 ? 0x8ff0ff : PCOL2[f.i], 1);
+    const tp = f.tip;
+    if (tp && (f.act === 3 || f.act === 7) && P(tp[0], tp[1], tp[2])) {
+      const full = f.act === 7 && f.pw >= 1;
+      dot(_x, _y, _z + 0.1, (f.act === 3 ? 0.5 : 0.1 + f.pw * 0.2 + (full ? 0.08 * sin(T * 30) : 0)) * F * _z, f.act === 3 ? SPC[f.sp] : full ? 0xfff0c0 : 0x9fb8ff, 1);
     }
-    if (f.act === 3 && f.tip && P(f.tip[0], f.tip[1], f.tip[2])) dot(_x, _y, _z + 0.1, 0.5 * F * _z, SPC[f.sp], 1);
     if (f.stun > 0)
       for (let i = 0; i < 3; i++) {
         const a = T * 6 + (i * TAU) / 3;
-        if (P(f.x + cos(a) * 0.35, f.y + 2.05, f.z + sin(a) * 0.35)) dot(_x, _y, _z, 2, 0xfff0b0, 1);
+        if (P(f.x + cos(a) * 0.35, f.y + 2.25, f.z + sin(a) * 0.35)) dot(_x, _y, _z, 2, 0xfff0b0, 1);
       }
   }
   // rayos y marcas
@@ -2615,7 +2807,7 @@ function condor(sh) {
         return sh ? P(x - (LX / LY) * yy, 0, z - (LZ / LY) * yy) && [_x, _y, _z] : P(x, yy, z) && [_x, _y, _z];
       });
       if (!S[0] || !S[1] || !S[2]) continue;
-      if (sh) stri(S[0][0], S[0][1], S[1][0], S[1][1], S[2][0], S[2][1], 1);
+      if (sh) stri(S[0][0], S[0][1], S[1][0], S[1][1], S[2][0], S[2][1]);
       else {
         const col = p === 2 && q === 6 ? 0xc4c8d6 : 0x1c1e28;
         tri(S[0][0], S[0][1], S[0][2], S[1][0], S[1][1], S[1][2], S[2][0], S[2][1], S[2][2], col, col, col, 0);
@@ -2643,8 +2835,8 @@ function overlay() {
       txt('START 1 · UN JUGADOR', FW / 2, 196, PC[9], 1, 2, 0.5);
       txt('START 2 · DOS JUGADORES', FW / 2, 214, PC[9], 1, 2, 0.5);
     }
-    txt('1 ATACAR   2 DEFENDER   3 ESCUDO/DESVÍO', FW / 2, 246, PC[7], 1, 1, 0.5);
-    txt('4 HECHIZO  5 SALTAR     6 USAR OBJETO', FW / 2, 256, PC[7], 1, 1, 0.5);
+    txt('1 ATACAR · MANTÉN PARA CARGAR    2 ESCUDO · A TIEMPO: PARADA', FW / 2, 246, PC[7], 1, 1, 0.5);
+    txt('3 RODAR   4 HECHIZO   5 SALTAR   6 USAR OBJETO', FW / 2, 256, PC[7], 1, 1, 0.5);
     if (best) txt('RÉCORD CONTRA LA MÁQUINA: ' + best, FW / 2, 285, PC[13], 1, 1, 0.5);
     return;
   }
@@ -2674,7 +2866,7 @@ function overlay() {
   }
   txt(ceil(TM), FW / 2, 6, TM < 10 && blink ? PC[15] : PC[9], 2, 3, 0.5);
   if (phase === 'intro' && PT > 0.3) txt('RONDA ' + RND, FW / 2, 120, PC[14], 3, 6, 0.5);
-  if (phase === 'intro' && RND === 1) txt('1 ATACAR · 2 DEFENDER · 3 ESCUDO · 4 HECHIZO · 5 SALTAR · 6 OBJETO', FW / 2, FH - 14, PC[7], 1, 1, 0.5);
+  if (phase === 'intro' && RND === 1) txt('1 ATACAR/CARGAR · 2 ESCUDO · 3 RODAR · 4 HECHIZO · 5 SALTAR · 6 OBJETO', FW / 2, FH - 14, PC[7], 1, 1, 0.5);
   if (msgT > 0) txt(msg, FW / 2, 120, msg === '¡A PELEAR!' ? PC[9] : PC[17], 3, 6, 0.5);
   if (phase === 'end') {
     const w = winner;
