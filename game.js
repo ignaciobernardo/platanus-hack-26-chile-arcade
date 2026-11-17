@@ -548,13 +548,10 @@ function floorPass() {
     const fz = cP + v * sP;
     const dy = -sP + v * cP;
     if (dy > -0.004) {
-      const k = cl(-v * 3, 0, 1);
-      for (let x = 0; x < FW; x++, i++) {
-        CR[i] = mix(150, 196, k);
-        CG[i] = mix(160, 196, k);
-        CB[i] = mix(198, 214, k);
-        ZB[i] = 0;
-      }
+      CR.fill(FOGR, i, i + FW);
+      CG.fill(FOGG, i, i + FW);
+      CB.fill(FOGB, i, i + FW);
+      ZB.fill(0, i, (i += FW));
       continue;
     }
     const u0 = (0.5 - CX) * iF;
@@ -1109,7 +1106,7 @@ const FONT = {
   J: '11152', K: '55655', L: '44447', M: '57555', N: '65555', O: '25552', P: '65644', Q: '25563', R: '65655',
   S: '74717', T: '72222', U: '55557', V: '55552', W: '55775', X: '55255', Y: '55222', Z: '71247',
   0: '75557', 1: '26227', 2: '61247', 3: '61216', 4: '55711', 5: '74616', 6: '34757', 7: '71222', 8: '75757', 9: '75716',
-  '!': '22202', '¡': '20222', '.': '00002', ',': '00024', ':': '02020', '-': '00700', '+': '02720',
+  '!': '22202', '¡': '20222', '.': '00002', ':': '02020', '-': '00700', '+': '02720',
   '·': '00200', '<': '12421', '>': '42124',
 };
 const ACC = { Á: 'A', É: 'E', Í: 'I', Ó: 'O', Ú: 'U', Ñ: 'N' };
@@ -1510,7 +1507,7 @@ function cpuIn(f, o, dt) {
     I.blk = f.plan === 3 || (f.plan === 1 && now) ? 1 : 0;
     I.mx = I.mz = 0;
     if (f.plan === 2 && now) {
-      I.p[3] = 1;
+      I.p[o.act === 8 || (o.act === 1 && o.cmb < 2 && rnd() < 0.5) ? 5 : 3] = 1;
       I.mx = -uz * f.side;
       I.mz = ux * f.side;
       f.plan = 0;
@@ -1544,6 +1541,7 @@ function cpuIn(f, o, dt) {
     const it = f.item;
     if ((it === 1 && f.hp < 60) || (it === 2 && d > 3 && d < 9) || it === 3 || (it === 4 && d < 5)) I.p[6] = 1;
   } else if (f.mana >= 1 && d > 3.2 && rnd() < 0.3) I.p[4] = 1;
+  else if (f.y > 0.6 && d < 3) I.p[1] = 1;
   else if (d < 2.1) {
     const r = rnd();
     if (r < 0.12) {
@@ -1719,7 +1717,7 @@ function startAtk(f, k) {
 function melee(f, o) {
   const dx = o.x - f.x;
   const dz = o.z - f.z;
-  return hypot(dx, dz) < 2.05 && abs(o.y - f.y) < 1.4 && abs(angD(f.face, atan2(dx, dz))) < 1.35;
+  return hypot(dx, dz) < 2.05 && abs(angD(f.face, atan2(dx, dz))) < 1.35 ? (f.cmb < 2 && o.y > 0.5 ? 2 : abs(o.y - f.y) < 1.4) : 0;
 }
 
 function cast(f, o) {
@@ -1728,7 +1726,7 @@ function cast(f, o) {
   f.mana -= 1;
   const sp = [16, 15, 10][k];
   const a = f.face;
-  PJ.push({ x: f.x + sin(a) * 0.9, y: f.y + 1.1, z: f.z + cos(a) * 0.9, vx: sin(a) * sp, vz: cos(a) * sp, o: f.i, k, t: 0, r: k === 2 ? 0.65 : 0.45 });
+  PJ.push({ x: f.x + sin(a) * 0.9, y: f.y + 0.75, z: f.z + cos(a) * 0.9, vx: sin(a) * sp, vz: cos(a) * sp, o: f.i, k, t: 0, r: k === 2 ? 0.65 : 0.45 });
   [SFX.ice, SFX.fire, SFX.slow][k]();
 }
 
@@ -1816,13 +1814,14 @@ function land(f) {
     f.act = 6;
     f.at = 0;
     const o = FS[1 - f.i];
-    if (hypot(o.x - f.x, o.z - f.z) < 2.3 && o.y < 1) hurt(o, f.x, f.z, 11, 8, 0.4, 4 | 8, f);
-    for (let i = 0; i < 24; i++) {
-      const a = (i / 24) * TAU;
-      part(f.x + cos(a) * 0.4, 0.1, f.z + sin(a) * 0.4, cos(a) * 7, 1, sin(a) * 7, 0.4, 0.12, 0xe8ecf8, 4 | 8);
+    const d = hypot(o.x - f.x, o.z - f.z);
+    if (d < 3 && o.y < 1) hurt(o, f.x, f.z, Math.round(14 - d * 2), 13, 0.45, 4 | 8 | 16, f);
+    for (let i = 0; i < 32; i++) {
+      const a = (i / 32) * TAU;
+      part(f.x + cos(a) * 0.4, 0.1, f.z + sin(a) * 0.4, cos(a) * 10, 1.5, sin(a) * 10, 0.4, 0.14, 0xe8ecf8, 4 | 8);
     }
-    stamp(f.x, f.z, 1, 150, 158, 196, 0.5);
-    SHK = 0.4;
+    stamp(f.x, f.z, 1.6, 150, 158, 196, 0.6);
+    SHK = 0.55;
     SFX.bash();
   }
 }
@@ -1933,9 +1932,11 @@ function upF(f, o, I, dt) {
           }
         }
         if (f.act === 1) {
-          if (t >= w0 && t < w1 && !f.hd && !o.ko && melee(f, o)) {
+          const m = t >= w0 && t < w1 && !f.hd && !o.ko && melee(f, o);
+          if (m) {
             f.hd = 1;
-            hurt(o, f.x, f.z, ATK[f.cmb], ATB[f.cmb], f.cmb === 2 ? 0.42 : 0.3, 8 | (f.cmb === 2 ? 4 : 0), f);
+            if (m > 1) dodged(o);
+            else hurt(o, f.x, f.z, ATK[f.cmb], ATB[f.cmb], f.cmb === 2 ? 0.42 : 0.3, 8 | (f.cmb === 2 ? 4 : 0), f);
           }
           if (t > 0.08 && f.bqt > 0 && f.bq === 1) {
             f.q = 1;
@@ -1964,10 +1965,11 @@ function upF(f, o, I, dt) {
         }
       } else if (a === 8) {
         f.spin = TAU * ease(cl((t - 0.03) / 0.27, 0, 1));
-        if (t > 0.05 && t < 0.3 && !f.hd && !o.ko && hypot(o.x - f.x, o.z - f.z) < 2.4 && abs(o.y - f.y) < 1.4) {
+        if (t > 0.05 && t < 0.3 && !f.hd && !o.ko && hypot(o.x - f.x, o.z - f.z) < 2.4) {
           f.hd = 1;
           const p = f.pw;
-          hurt(o, f.x, f.z, 9 + 12 * p, 8 + 9 * p, 0.45, 8 | 16 | 4 | (p >= 1 ? 32 : 0), f);
+          if (o.y > 0.5) dodged(o);
+          else hurt(o, f.x, f.z, 9 + 12 * p, 8 + 9 * p, 0.45, 8 | 16 | 4 | (p >= 1 ? 32 : 0), f);
         }
         if (t > 0.55) f.act = 0;
       } else if (a === 2) {
@@ -2953,7 +2955,7 @@ function overlay() {
         txt('<', FW / 2 + s.length * 4 + 6, 140 + i * 18, PC[14], 2, 2);
       }
     });
-    txt('STICK Y BOTÓN 1  ·  START 1  ·  START 2', FW / 2, 180, PC[5], 1, 1, 0.5);
+    txt('STICK Y BOTÓN 1 O START', FW / 2, 180, PC[5], 1, 1, 0.5);
     // los seis botones como en el gabinete
     CTL.forEach(([a, b], i) => {
       const x = 26 + (i % 3) * 128;
@@ -3003,12 +3005,12 @@ function overlay() {
   }
   txt(ceil(TM), FW / 2, 6, TM < 10 && blink ? PC[15] : PC[9], 2, 3, 0.5);
   if (phase === 'intro' && PT > 0.3) txt('RONDA ' + RND, FW / 2, 120, PC[14], 3, 6, 0.5);
-  if (msgT > 0) txt(msg, FW / 2, 120, msg === '¡A PELEAR!' ? PC[9] : PC[17], 3, 6, 0.5);
+  if (msgT > 0) txt(msg, FW / 2, 120, PC[17], 3, 6, 0.5);
   if (phase === 'end') {
     const w = winner;
     const s = mode === 'solo' ? (w === 0 ? '¡GANASTE!' : 'PERDISTE') : w ? 'GANA J2' : 'GANA J1';
     txt(s, FW / 2, 60, PCI[w], 3, 7, 0.5);
-    if (mode === 'solo') txt(w === 0 ? 'RACHA ' + streak + ' · RÉCORD ' + best : 'RACHA FINAL ' + streak + ' · RÉCORD ' + best, FW / 2, 108, PC[8], 1, 2, 0.5);
+    if (mode === 'solo') txt('RACHA ' + streak + ' · RÉCORD ' + best, FW / 2, 108, PC[8], 1, 2, 0.5);
     if (PT > 1.5 && blink) txt(mode === 'solo' && w === 0 ? 'START 1 · SIGUIENTE RIVAL' : 'START 1 · OTRA VEZ', FW / 2, 250, PC[9], 1, 2, 0.5);
   }
 }
