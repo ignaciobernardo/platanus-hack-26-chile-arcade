@@ -159,7 +159,6 @@ const CB = new Uint8ClampedArray(NP);
 const ZB = new Float32Array(NP);
 const SM = new Uint8Array(NP);
 let O32 = null;
-let SDA = 8;
 
 // Triángulo con color por vértice y z-buffer. md: 0 opaco, 1 aditivo, 2 luz sobre el suelo, 3 trama (vidrio)
 function tri(ax, ay, az, bx, by, bz, cx, cy, cz, ca, cb, cc, md) {
@@ -250,7 +249,7 @@ function tri(ax, ay, az, bx, by, bz, cx, cy, cz, ca, cb, cc, md) {
             CB[i] += B;
           }
         } else if (md > 4) SM[i] = 1;
-        else if (z > ZB[i] && BAY[ro | (x & 3)] < SDA) {
+        else if (z > ZB[i] && BAY[ro | (x & 3)] < 8) {
           CR[i] = R;
           CG[i] = G;
           CB[i] = B;
@@ -278,7 +277,7 @@ function tri(ax, ay, az, bx, by, bz, cx, cy, cz, ca, cb, cc, md) {
 const stri = (ax, ay, bx, by, cx, cy) => tri(ax, ay, 0, bx, by, 0, cx, cy, 0, 0, 0, 0, 5);
 
 // Punto/disco en pantalla. md 0 opaco, 1 aditivo con caída suave, 3 trama
-function dot(sx, sy, iz, s, c, md, al = 8) {
+function dot(sx, sy, iz, s, c, md) {
   const h = s / 2;
   const x0 = max(0, floor(sx - h));
   const x1 = min(FW - 1, floor(sx + h));
@@ -301,12 +300,6 @@ function dot(sx, sy, iz, s, c, md, al = 8) {
         CR[i] += r * k;
         CG[i] += g * k;
         CB[i] += b * k;
-      } else if (md === 3) {
-        if (BAY[((y & 3) << 2) | (x & 3)] < al) {
-          CR[i] = r;
-          CG[i] = g;
-          CB[i] = b;
-        }
       } else {
         CR[i] = r;
         CG[i] = g;
@@ -403,9 +396,9 @@ function fogc(c, d) {
   const g = 1 - f;
   return pk((c >> 16) * g + FOGR * f, ((c >> 8) & 255) * g + FOGG * f, (c & 255) * g + FOGB * f);
 }
-const SHR = [1, 0.56, 0.84, 0.5];
-const SHG = [1, 0.63, 0.87, 0.56];
-const SHB = [1, 0.79, 0.93, 0.74];
+const SHR = [1, 0.56];
+const SHG = [1, 0.63];
+const SHB = [1, 0.79];
 
 // --- Cámara ---
 
@@ -449,7 +442,8 @@ function P(x, y, z) {
 // --- La meseta ---
 
 const AR = 11.6;
-const rad = (a) => AR + 0.85 * sin(3 * a + 1) + 0.55 * sin(5 * a + 2.2) + 0.3 * sin(9 * a + 0.4) + 0.16 * sin(17 * a + 3);
+const rad0 = (a) => AR + 0.85 * sin(3 * a + 1) + 0.55 * sin(5 * a + 2.2) + 0.3 * sin(9 * a + 0.4) + 0.16 * sin(17 * a + 3);
+const rad = (a) => rad0(a) * ES;
 const TS = 1024;
 const TH = 16;
 const TK = TS / (2 * TH);
@@ -672,13 +666,13 @@ const PZb = new Float32Array(4000);
 const PCb = new Int32Array(4000);
 const PVb = new Uint8Array(4000);
 // sh: proyecta la malla sobre el suelo en la dirección del sol y marca su sombra
-function drawMesh(m, sh = 0) {
+function drawMesh(m, sh = 0, s = 1) {
   const v = m.v;
   const n = m.c.length;
   for (let i = 0; i < n; i++) {
     const y = v[i * 3 + 1];
     const k = sh ? y / LY : 0;
-    PVb[i] = P(v[i * 3] - LX * k, sh ? 0 : y, v[i * 3 + 2] - LZ * k);
+    PVb[i] = P(v[i * 3] * s - LX * k, sh ? 0 : y, v[i * 3 + 2] * s - LZ * k);
     PXb[i] = _x;
     PYb[i] = _y;
     PZb[i] = _z;
@@ -693,7 +687,7 @@ function drawMesh(m, sh = 0) {
     const b = t[j + 1];
     const c = t[j + 2];
     if (!(PVb[a] & PVb[b] & PVb[c])) continue;
-    if (!sh && N[j] * (ex - v[a * 3]) + N[j + 1] * (ey - v[a * 3 + 1]) + N[j + 2] * (ez - v[a * 3 + 2]) <= 0) continue;
+    if (!sh && N[j] * (ex - v[a * 3] * s) + N[j + 1] * (ey - v[a * 3 + 1]) + N[j + 2] * (ez - v[a * 3 + 2] * s) <= 0) continue;
     tri(PXb[a], PYb[a], PZb[a], PXb[b], PYb[b], PZb[b], PXb[c], PYb[c], PZb[c], PCb[a], PCb[b], PCb[c], sh ? 5 : 0);
   }
 }
@@ -1082,7 +1076,6 @@ function drawParts() {
     const s = min(40, QS[i] * F * _z * (f & 16 ? 2 - k : 1));
     if (s < 0.4) continue;
     if (f & 1) dot(_x, _y, _z + 0.02, max(1, s), sc3(QC[i], k), 1);
-    else if (f & 32) dot(_x, _y, _z, max(1, s), fogc(QC[i], _d), 3, k * 10);
     else dot(_x, _y, _z, max(1, s), fogc(QC[i], _d), 0);
   }
 }
@@ -1116,8 +1109,8 @@ const FONT = {
   J: '11152', K: '55655', L: '44447', M: '57555', N: '65555', O: '25552', P: '65644', Q: '25563', R: '65655',
   S: '74717', T: '72222', U: '55557', V: '55552', W: '55775', X: '55255', Y: '55222', Z: '71247',
   0: '75557', 1: '26227', 2: '61247', 3: '61216', 4: '55711', 5: '74616', 6: '34757', 7: '71222', 8: '75757', 9: '75716',
-  '!': '22202', '¡': '20222', '?': '61202', '.': '00002', ',': '00024', ':': '02020', '-': '00700', '+': '02720',
-  '/': '11244', '·': '00200', '*': '05250',
+  '!': '22202', '¡': '20222', '.': '00002', ',': '00024', ':': '02020', '-': '00700', '+': '02720',
+  '·': '00200', '<': '12421', '>': '42124',
 };
 const ACC = { Á: 'A', É: 'E', Í: 'I', Ó: 'O', Ú: 'U', Ñ: 'N' };
 function fill(x, y, w, h, c) {
@@ -1200,33 +1193,34 @@ function bus(n, dry = 1) {
   n.connect(RV);
 }
 let MUS = 0;
+const ER = 'exponentialRampToValueAtTime';
 function tone(f, dur, type, vol, f2 = 0, dl = 0) {
   if (!AC || AC.state !== 'running' || (mode === 'title' && !MUS)) return;
   const t = AC.currentTime + dl;
   const o = AC.createOscillator();
   const g = AC.createGain();
-  o.type = type;
+  o.type = { s: 'sine', q: 'square', t: 'triangle', w: 'sawtooth' }[type];
   o.frequency.setValueAtTime(f, t);
-  if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  if (f2) o.frequency[ER](f2, t + dur);
   g.gain.setValueAtTime(vol, t);
-  g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  g.gain[ER](0.0008, t + dur);
   o.connect(g);
   bus(g);
   o.start(t);
   o.stop(t + dur + 0.05);
 }
-function noise(dur, vol, fq, type = 'lowpass', dl = 0, f2 = 0) {
+function noise(dur, vol, fq, type = 'l', dl = 0, f2 = 0) {
   if (!AC || AC.state !== 'running' || (mode === 'title' && !MUS)) return;
   const t = AC.currentTime + dl;
   const s = AC.createBufferSource();
   s.buffer = NB;
   const f = AC.createBiquadFilter();
-  f.type = type;
+  f.type = { l: 'lowpass', h: 'highpass', b: 'bandpass' }[type];
   f.frequency.setValueAtTime(fq, t);
-  if (f2) f.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  if (f2) f.frequency[ER](f2, t + dur);
   const g = AC.createGain();
   g.gain.setValueAtTime(vol, t);
-  g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  g.gain[ER](0.0008, t + dur);
   s.connect(f);
   f.connect(g);
   bus(g);
@@ -1234,87 +1228,85 @@ function noise(dur, vol, fq, type = 'lowpass', dl = 0, f2 = 0) {
   s.stop(t + dur + 0.05);
 }
 const SFX = {
-  swing: () => noise(0.13, 0.22, 900, 'bandpass', 0, 3200),
+  swing: () => noise(0.13, 0.22, 900, 'b', 0, 3200),
   hit: (v = 1) => {
     noise(0.16, 0.5 * v, 1300);
-    tone(150, 0.14, 'square', 0.2 * v, 55);
+    tone(150, 0.14, 'q', 0.2 * v, 55);
   },
   block: () => {
-    tone(1250, 0.2, 'square', 0.06);
-    tone(1870, 0.3, 'triangle', 0.08);
-    noise(0.05, 0.2, 4000, 'highpass');
+    tone(1250, 0.2, 'q', 0.06);
+    tone(1870, 0.3, 't', 0.08);
+    noise(0.05, 0.2, 4000, 'h');
   },
   parry: () => {
-    tone(2093, 0.6, 'triangle', 0.13);
-    tone(3136, 0.7, 'sine', 0.08);
-    noise(0.1, 0.25, 5000, 'highpass');
+    tone(2093, 0.6, 't', 0.13);
+    tone(3136, 0.7, 's', 0.08);
+    noise(0.1, 0.25, 5000, 'h');
   },
   bash: () => {
     noise(0.2, 0.55, 420);
-    tone(95, 0.25, 'sine', 0.45, 45);
+    tone(95, 0.25, 's', 0.45, 45);
   },
-  jump: () => noise(0.14, 0.12, 500, 'bandpass', 0, 1500),
-  roll: () => noise(0.3, 0.22, 1400, 'bandpass', 0, 300),
-  dodge: () => tone(1320, 0.18, 'sine', 0.06, 1980),
-  charge: () => tone(180, 0.7, 'sawtooth', 0.035, 620),
+  jump: () => noise(0.14, 0.12, 500, 'b', 0, 1500),
+  roll: () => noise(0.3, 0.22, 1400, 'b', 0, 300),
+  dodge: () => tone(1320, 0.18, 's', 0.06, 1980),
+  charge: () => tone(180, 0.7, 'w', 0.035, 620),
   full: () => {
-    tone(1760, 0.35, 'triangle', 0.08);
-    tone(2637, 0.5, 'sine', 0.05, 0, 0.04);
+    tone(1760, 0.35, 't', 0.08);
+    tone(2637, 0.5, 's', 0.05, 0, 0.04);
   },
   heavy: () => {
-    noise(0.4, 0.5, 500, 'bandpass', 0, 2600);
-    tone(110, 0.35, 'square', 0.1, 50);
+    noise(0.4, 0.5, 500, 'b', 0, 2600);
+    tone(110, 0.35, 'q', 0.1, 50);
   },
-  land: () => noise(0.09, 0.15, 2600, 'highpass'),
-  step: () => noise(0.04, 0.03, 2200, 'highpass'),
+  land: () => noise(0.09, 0.15, 2600, 'h'),
+  step: () => noise(0.04, 0.03, 2200, 'h'),
   ice: () => {
-    [1568, 2093, 2637, 3136].forEach((f, i) => tone(f, 0.3, 'triangle', 0.06, 0, i * 0.03));
-    noise(0.3, 0.08, 6000, 'highpass');
+    [1568, 2093, 2637, 3136].forEach((f, i) => tone(f, 0.3, 't', 0.06, 0, i * 0.03));
+    noise(0.3, 0.08, 6000, 'h');
   },
   fire: () => {
-    noise(0.4, 0.35, 600, 'lowpass', 0, 2400);
-    tone(110, 0.3, 'sawtooth', 0.06, 70);
+    noise(0.4, 0.35, 600, 'l', 0, 2400);
+    tone(110, 0.3, 'w', 0.06, 70);
   },
   slow: () => {
-    tone(440, 0.7, 'sine', 0.12, 160);
-    tone(446, 0.7, 'sine', 0.1, 163);
+    tone(440, 0.7, 's', 0.12, 160);
+    tone(446, 0.7, 's', 0.1, 163);
   },
   freeze: () => {
-    noise(0.25, 0.3, 5000, 'highpass');
-    [2637, 1976, 1568].forEach((f, i) => tone(f, 0.4, 'triangle', 0.07, 0, i * 0.05));
+    noise(0.25, 0.3, 5000, 'h');
+    [2637, 1976, 1568].forEach((f, i) => tone(f, 0.4, 't', 0.07, 0, i * 0.05));
   },
   shatter: () => {
-    noise(0.35, 0.35, 3500, 'highpass');
-    [3520, 2960, 4186].forEach((f, i) => tone(f, 0.2, 'square', 0.03, 0, i * 0.04));
+    noise(0.35, 0.35, 3500, 'h');
+    [3520, 2960, 4186].forEach((f, i) => tone(f, 0.2, 'q', 0.03, 0, i * 0.04));
   },
   boom: (v = 1) => {
-    noise(1, 0.9 * v, 520, 'lowpass', 0, 120);
-    tone(75, 0.9, 'sine', 0.7 * v, 28);
+    noise(1, 0.9 * v, 520, 'l', 0, 120);
+    tone(75, 0.9, 's', 0.7 * v, 28);
   },
   thunder: () => {
-    noise(0.12, 0.6, 3000, 'highpass');
-    noise(1.4, 0.8, 400, 'lowpass', 0.05, 90);
-    tone(55, 1, 'sine', 0.5, 30);
+    noise(0.12, 0.6, 3000, 'h');
+    noise(1.4, 0.8, 400, 'l', 0.05, 90);
+    tone(55, 1, 's', 0.5, 30);
   },
-  gust: () => noise(0.7, 0.45, 400, 'bandpass', 0, 2200),
-  potion: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 'triangle', 0.09, 0, i * 0.07)),
+  gust: () => noise(0.7, 0.45, 400, 'b', 0, 2200),
+  potion: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 't', 0.09, 0, i * 0.07)),
   pick: () => {
-    tone(880, 0.1, 'square', 0.06);
-    tone(1320, 0.18, 'square', 0.06, 0, 0.07);
+    tone(880, 0.1, 'q', 0.06);
+    tone(1320, 0.18, 'q', 0.06, 0, 0.07);
   },
-  chime: () => tone(1760, 1.2, 'sine', 0.05),
+  chime: () => tone(1760, 1.2, 's', 0.05),
   ko: () => {
-    tone(220, 1.2, 'sawtooth', 0.15, 50);
+    tone(220, 1.2, 'w', 0.15, 50);
     SFX.boom(0.8);
   },
-  gong: () => [98, 147, 196, 294].forEach((f) => tone(f, 2.6, 'sine', 0.11, f * 0.995)),
-  fall: () => tone(900, 1.3, 'sine', 0.1, 120),
-  condor: () => [0, 0.5].forEach((d) => tone(1900, 0.5, 'sine', 0.035, 1100, d)),
-  ui: () => tone(880, 0.07, 'square', 0.06),
+  gong: () => [98, 147, 196, 294].forEach((f) => tone(f, 2.6, 's', 0.11, f * 0.995)),
+  fall: () => tone(900, 1.3, 's', 0.1, 120),
+  ui: () => tone(880, 0.07, 'q', 0.06),
 };
 
 // Música: en el título una quena sobre un colchón; en el combate un bombo legüero acelerado
-const MEL = [9, -1, 12, 14, 16, -1, 14, 12, 9, -1, -1, 7, 9, -1, -1, -1, 16, -1, 19, 16, 14, -1, 12, 14, 9, -1, 12, -1, 9, -1, -1, -1];
 const BASS = [-15, -15, -12, -10];
 let mi = 0;
 let mt = 0;
@@ -1329,19 +1321,14 @@ function music(fight) {
     if (fight) {
       const s = mi & 15;
       if (s === 0 || s === 6 || s === 8 || s === 11) {
-        tone(78, 0.28, 'sine', 0.32, 40, d);
-        noise(0.06, 0.12, 180, 'lowpass', d);
+        tone(78, 0.28, 's', 0.32, 40, d);
+        noise(0.06, 0.12, 180, 'l', d);
       }
-      if (s === 4 || s === 12) noise(0.08, 0.1, 1800, 'bandpass', d);
-      if (!(s & 1)) noise(0.03, 0.025, 7000, 'highpass', d);
-      if (s === 0 || s === 10) tone(b, 0.3, 'triangle', 0.1, 0, d);
+      if (s === 4 || s === 12) noise(0.08, 0.1, 1800, 'b', d);
+      if (!(s & 1)) noise(0.03, 0.025, 7000, 'h', d);
+      if (s === 0 || s === 10) tone(b, 0.3, 't', 0.1, 0, d);
     } else {
-      const n = MEL[mi & 31];
-      if (n >= 0) {
-        const f = 440 * 2 ** (n / 12);
-        tone(f, 0.5, 'sine', 0.06, f * 0.985, d);
-      }
-      if (!(mi & 7)) [1, 1.5, 2.4].forEach((k) => tone(b * k, 2, 'triangle', 0.035, 0, d));
+      if (!(mi & 7)) [1, 1.5, 2.4].forEach((k) => tone(b * k, 2, 't', 0.035, 0, d));
     }
     mi++;
     mt += stp;
@@ -1358,9 +1345,9 @@ const DK = 0x2a2e42;
 const SPC = [0x8ff0ff, 0xff8c32, 0xb48cff];
 const SPN = ['HIELO', 'FUEGO', 'LENTO'];
 const SPI = [PC[19], PC[16], PC[21]];
-const ITN = ['', 'POCIÓN', 'BOMBA', 'RAYO', 'CRISTAL', 'VENDAVAL'];
-const ITC = [0, 0xff6f8a, 0x30303c, 0xffe060, 0x8ff0ff, 0xf2f4ff];
-const ITI = [0, PC[13], PC[15], PC[17], PC[19], PC[9]];
+const ITN = ['', 'POCIÓN', 'BOMBA', 'RAYO', 'VENDAVAL'];
+const ITC = [0, 0xff6f8a, 0x30303c, 0xffe060, 0xf2f4ff];
+const ITI = [0, PC[13], PC[15], PC[17], PC[9]];
 
 let phase = 'boot';
 let mode = 'title';
@@ -1380,6 +1367,7 @@ let streak = 0;
 let msg = '';
 let msgT = 0;
 let winner = -1;
+let MSEL = 0;
 let FS = [];
 let PJ = [];
 let IT = [];
@@ -1391,22 +1379,16 @@ let BOLT = [];
 let FT = [];
 let LT = [];
 let itT = 4;
-let condT = 14;
-let COND = null;
 const CAM = { x: 0, z: 0, d: 30, yw: 0, pt: 0.8 };
 
 const onPlat = (x, z) => hypot(x, z) < rad(atan2(z, x));
-function groundH(x, z) {
-  for (const o of OB) if (o.k && o.al && (x - o.x) ** 2 + (z - o.z) ** 2 < o.r * o.r) return o.h;
-  return 0;
-}
 
 function mkF(i) {
   return {
     i, x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, kx: 0, kz: 0, face: 0, hp: 100, gh: 100, gt: 0, mana: 1, sp: 0,
-    item: 0, act: 0, at: 0, cmb: 0, q: 0, hd: 0, blk: 0, stun: 0, frz: 0, burn: 0, bt: 0, slow: 0, rapid: 0,
+    item: 0, act: 0, at: 0, cmb: 0, q: 0, hd: 0, blk: 0, stun: 0, frz: 0, burn: 0, bt: 0, slow: 0,
     hs: 0, inv: 0, fl: 0, fall: 0, ko: 0, kod: 0, wk: 0, mv: 0, trail: [], w: 0, pw: 0, pf: 0, spin: 0, rl: 0,
-    rb: 0, rx: 0, rz: 0, bst: 9, pbc: 0, gb: 0, dg: 0, aid: 0, pa: -1, plan: 0, hold: 0,
+    rb: 0, rx: 0, rz: 0, bst: 9, pbc: 0, gb: 0, dg: 0, aid: 0, pa: -1, plan: 0, hold: 0, tn: 0, kd: 0,
     Q: [0.22, 0.2, 0.3, -0.25, 0.55, -0.21, 0.17, 0.25, -0.4, 0, 0, 0.05, 0.04, 0],
     bq: 0, bqt: 0, cpu: 0, ct: 0, side: 1, skl: 0.6, lag: 1, ci: { mx: 0, mz: 0, p: [], blk: 0, hu: 0 },
   };
@@ -1441,6 +1423,10 @@ function newRound() {
   GR.set(G0R);
   GG.set(G0G);
   GB.set(G0B);
+  GA0 = GA0 || GA.slice();
+  GA.set(GA0);
+  ES = ESa = 1;
+  FIN = null;
   for (const o of OB) stamp(o.x, o.z, o.r + 1, 112, 118, 156, 0.45);
   FS = FS.map((f, i) =>
     Object.assign(mkF(i), { w: f.w, cpu: f.cpu, skl: f.skl, lag: f.lag, lv: f.lv, x: i ? 5.5 : -5.5, face: i ? -PI / 2 : PI / 2, sp: (RND + i) % 3 }),
@@ -1508,6 +1494,10 @@ function cpuIn(f, o, dt) {
   const d = hypot(dx, dz) || 1;
   const ux = dx / d;
   const uz = dz / d;
+  if (o.tn && o.stun > 0.15 && d < 2.6) {
+    I.p[[1, 2, 4][(rnd() * 3) | 0]] = 1;
+    return I;
+  }
   // ante cada ataque del rival elige: parada perfecta, rodar o cubrirse
   const thr = (o.act === 1 || o.act === 5 || o.act > 6) && d < 3.4;
   if (thr && f.pa !== o.aid) {
@@ -1533,12 +1523,9 @@ function cpuIn(f, o, dt) {
   f.ct = rr(0.09, 0.2) * f.lag;
   I.blk = 0;
   const inc = PJ.find((p) => p.o !== f.i && hypot(p.x - f.x, p.z - f.z) < 5 && p.vx * (f.x - p.x) + p.vz * (f.z - p.z) > 0);
-  const bomb = BM.find((b) => hypot(b.tx - f.x, b.tz - f.z) < 3) || LM.find((l) => hypot(l.x - f.x, l.z - f.z) < 1.8);
-  let flee = 0;
-  if (bomb) {
-    flee = 1;
-    if (rnd() < 0.3) I.p[3] = 1;
-  } else if (inc && rnd() < f.skl) {
+  const flee = BM.some((b) => hypot(b.tx - f.x, b.tz - f.z) < 3) || LM.some((l) => hypot(l.x - f.x, l.z - f.z) < 1.8);
+  if (flee) I.p[3] = rnd() < 0.3;
+  else if (inc && rnd() < f.skl) {
     const r = rnd();
     if (r < 0.3) I.p[5] = 1;
     else if (r < 0.65) {
@@ -1555,7 +1542,7 @@ function cpuIn(f, o, dt) {
     f.hold = 0.95;
   } else if (f.item && rnd() < 0.3) {
     const it = f.item;
-    if ((it === 1 && f.hp < 60) || (it === 2 && d > 3 && d < 9) || it === 3 || (it === 4 && f.mana < 1.5) || (it === 5 && d < 5)) I.p[6] = 1;
+    if ((it === 1 && f.hp < 60) || (it === 2 && d > 3 && d < 9) || it === 3 || (it === 4 && d < 5)) I.p[6] = 1;
   } else if (f.mana >= 1 && d > 3.2 && rnd() < 0.3) I.p[4] = 1;
   else if (d < 2.1) {
     const r = rnd();
@@ -1605,6 +1592,21 @@ const ATA = [
 const ATK = [7, 7, 12];
 const ATB = [3, 3, 8];
 const ease = (k) => k * k * (3 - 2 * k);
+// Pose de un tajo: c combo (0 derecha a izquierda, 1 revés, 2 de arriba), k -1..0 preparación, 0..1 golpe
+function atkPose(c, k) {
+  if (c === 2) {
+    const ph = k < 0 ? mix(0.4, 2.5, k + 1) : mix(2.5, -0.75, ease(k));
+    return [0.06, 0.45 + 0.45 * sin(ph), 0.05 + 0.45 * cos(ph), 0, ph, -0.18, 0.3, 0.18, -0.6, 0, 0, k < 0 ? -0.12 : 0.3 * k, k < 0 ? 0 : 0.14 * k, 0];
+  }
+  const s0 = c ? -1.6 : 1.9;
+  const th = k < 0 ? mix(0.3, s0, k + 1) : mix(s0, c ? 1.5 : -1.3, ease(k));
+  return [sin(th) * 0.46, c ? 0.5 : 0.42, cos(th) * 0.46 + 0.05, th, 0.08, -0.16, 0.32, 0.16, -0.6, 0, th * 0.35, k < 0 ? 0 : 0.15 * k, 0.06, 0];
+}
+// Atontado: escudo y espada arriba, tambaleándose
+const stunA = () => {
+  const w = sin(T * 7);
+  return [0.3, 0.98 + w * 0.04, 0.02, 0.3, 1.45, -0.32, 0.92 - w * 0.04, 0.08, -0.5, 0.9, w * 0.15, -0.12, 0, w * 0.25];
+};
 
 // fl: 1 no se puede bloquear, 2 hechizo, 4 lanza al aire, 8 cuerpo a cuerpo, 16 cargado, 32 rompe la guardia
 // Devuelve 0 nada/esquivado, 1 bloqueado, 2 golpe, 3 parada perfecta
@@ -1628,6 +1630,8 @@ function hurt(B, sx, sz, dmg, kb, hst, fl = 0, A = null) {
         A.stun = fl & 16 ? 1.2 : 0.95;
         A.act = 0;
         A.hold = 0;
+        A.tn = 1;
+        B.bqt = 0;
         A.kx -= ux * 3;
         A.kz -= uz * 3;
       }
@@ -1751,11 +1755,6 @@ function useItem(f, o) {
     LM.push({ x: o.x, z: o.z, t: 0, o: f.i, tg: o });
     SFX.chime();
   } else if (it === 4) {
-    f.mana = 3;
-    f.rapid = 6;
-    burst(f.x, 1, f.z, 30, 3, 1, 0.07, 0x9ff4ff, 1, 2);
-    SFX.ice();
-  } else if (it === 5) {
     const a = f.face;
     for (let i = 0; i < 70; i++) {
       const b = a + rr(-0.6, 0.6);
@@ -1776,7 +1775,7 @@ function useItem(f, o) {
   }
 }
 
-function boom(x, z, owner) {
+function boom(x, z) {
   for (const f of FS) {
     const d = hypot(f.x - x, f.z - z);
     if (d < 2.8 && f.y < 2.5) hurt(f, x, z, 20 * (1 - d / 4), 13, 0.5, 2 | 4);
@@ -1784,13 +1783,11 @@ function boom(x, z, owner) {
   hitObs(x, z, 2.6, 3);
   burst(x, 0.6, z, 14, 2.5, 0.5, 0.5, 0xff8a30, 1 | 4 | 16, 1.5);
   burst(x, 0.5, z, 60, 9, 0.7, 0.12, 0xffc070, 1 | 4, 2);
-  burst(x, 0.5, z, 30, 4, 1.6, 0.35, 0x3a3848, 32 | 4 | 16, 2);
   burst(x, 0.2, z, 40, 7, 1, 0.08, 0xe8ecf8, 2 | 8, 4);
   stamp(x, z, 2, 60, 56, 70, 0.75);
   FLASH = 60;
   SHK = 0.7;
   SFX.boom();
-  owner;
 }
 
 function hitObs(x, z, r, dmg) {
@@ -1801,7 +1798,6 @@ function hitObs(x, z, r, dmg) {
     if (o.hp <= 0) {
       o.al = 0;
       burst(o.x, 1.2, o.z, 70, 6, 1.4, 0.12, 0xd8e2fa, 2 | 8, 3);
-      burst(o.x, 0.4, o.z, 20, 2, 1.8, 0.4, 0xc0c8e0, 32 | 16 | 4);
       SFX.shatter();
       SHK = 0.35;
     }
@@ -1850,13 +1846,12 @@ function upF(f, o, I, dt) {
   f.fl = max(0, f.fl - dt);
   f.inv = max(0, f.inv - dt);
   f.slow = max(0, f.slow - dt);
-  f.rapid = max(0, f.rapid - dt);
   f.dg -= dt;
   f.gb = max(0, f.gb - dt);
   f.gt -= dt;
   if (f.gt < 0) f.gh = max(f.hp, f.gh - 60 * dt);
   if (f.gh < f.hp) f.gh = f.hp;
-  if (phase === 'fight') f.mana = min(3, f.mana + (dt / 2.8) * (f.rapid > 0 ? 3.5 : 1));
+  if (phase === 'fight') f.mana = min(3, f.mana + dt / 2.8);
   if (f.burn > 0 && !f.ko) {
     f.burn -= dt;
     f.bt -= dt;
@@ -1910,8 +1905,10 @@ function upF(f, o, I, dt) {
   const busy = f.ko || f.frz > 0 || f.stun > 0 || f.hs > 0 || phase !== 'fight';
   f.frz = max(0, f.frz - dt);
   f.stun = max(0, f.stun - dt);
+  if (!f.stun) f.tn = 0;
+  if (!f.ko) f.kd = max(0, f.kd - dt * 2.2);
   f.hs = max(0, f.hs - dt);
-  let onG = f.y <= groundH(f.x, f.z) + 0.01 && f.vy <= 0;
+  let onG = f.y <= 0 + 0.01 && f.vy <= 0;
   if (!busy) {
     if (f.act) {
       f.at += adt;
@@ -1986,6 +1983,11 @@ function upF(f, o, I, dt) {
     }
     if (!f.act && f.bqt > 0) {
       const b = f.bq;
+      if (o.tn && o.stun > 0.1 && hypot(o.x - f.x, o.z - f.z) < 2.6 && (b === 1 || b === 2 || (b === 4 && f.mana >= 1))) {
+        f.bqt = 0;
+        startFin(f, o, b);
+        return;
+      }
       if (b === 1) {
         if (onG) startAtk(f, 0);
         else {
@@ -2061,7 +2063,7 @@ function upF(f, o, I, dt) {
   f.z += (f.vz + f.kz) * dt;
   f.vy -= (f.act === 5 ? 60 : 30) * dt;
   f.y += f.vy * dt;
-  const gh = groundH(f.x, f.z);
+  const gh = 0;
   if (f.y <= gh) {
     if (f.vy < -3) land(f);
     f.y = gh;
@@ -2069,7 +2071,7 @@ function upF(f, o, I, dt) {
   }
   // choques con obstáculos y rebote contra penitentes
   for (const ob of OB) {
-    if (!ob.al || (ob.k && f.y >= ob.h - 0.12)) continue;
+    if (!ob.al) continue;
     const dx = f.x - ob.x;
     const dz = f.z - ob.z;
     const d = hypot(dx, dz) || 1;
@@ -2134,23 +2136,12 @@ function upF(f, o, I, dt) {
   const t = f.at;
   if (f.ko) A = [0.5, 0.15, 0.15, 1.2, -0.2, -0.5, 0.15, 0.1, -1.4, 0.4, 0, -0.1, 0, -0.3];
   else if (f.gb > 0) A = [0.45, 0.6, -0.1, 0.6, 1, -0.62, 0.55, -0.2, -1.9, 0.3, -0.3, -0.3, 0, -0.3];
-  else if (f.stun > 0) {
-    const w = sin(T * 7);
-    A = [0.3, 0.98 + w * 0.04, 0.02, 0.3, 1.45, -0.32, 0.92 - w * 0.04, 0.08, -0.5, 0.9, w * 0.15, -0.12, 0, w * 0.25];
-  } else if (f.hs > 0) A = [0.36, 0.25, 0.08, 0.6, 0.2, -0.36, 0.25, 0.08, -0.9, 0, 0, -0.32, 0.04, -0.3];
+  else if (f.stun > 0) A = stunA();
+  else if (f.hs > 0) A = [0.36, 0.25, 0.08, 0.6, 0.2, -0.36, 0.25, 0.08, -0.9, 0, 0, -0.32, 0.04, -0.3];
   else if (f.act === 1) {
     const [w0, w1] = ATA[f.cmb];
-    const k = t < w0 ? t / w0 - 1 : cl((t - w0) / (w1 - w0), 0, 1);
     fast = 1;
-    if (f.cmb === 2) {
-      const ph = k < 0 ? mix(0.4, 2.5, k + 1) : mix(2.5, -0.75, ease(k));
-      A = [0.06, 0.45 + 0.45 * sin(ph), 0.05 + 0.45 * cos(ph), 0, ph, -0.18, 0.3, 0.18, -0.6, 0, 0, k < 0 ? -0.12 : 0.3 * k, k < 0 ? 0 : 0.14 * k, 0];
-    } else {
-      const s0 = f.cmb ? -1.6 : 1.9;
-      const s1 = f.cmb ? 1.5 : -1.3;
-      const th = k < 0 ? mix(0.3, s0, k + 1) : mix(s0, s1, ease(k));
-      A = [sin(th) * 0.46, f.cmb ? 0.5 : 0.42, cos(th) * 0.46 + 0.05, th, 0.08, -0.16, 0.32, 0.16, -0.6, 0, th * 0.35, k < 0 ? 0 : 0.15 * k, 0.06, 0];
-    }
+    A = atkPose(f.cmb, t < w0 ? t / w0 - 1 : cl((t - w0) / (w1 - w0), 0, 1));
   } else if (f.act === 7) {
     const p = f.pw;
     A = [0.42, 0.55, -0.3, 2.5, 0.35 + p * 0.3, -0.25, 0.35, 0.3, -0.2, 0, 0.7, 0.1, 0.12 + p * 0.1, 0];
@@ -2183,7 +2174,7 @@ function pose(f) {
   if (f.inv > 0 && (T * 20) & 1) return;
   const Q = f.Q;
   let B = mR(mTr(ID, f.x, f.y, f.z), 1, f.face + (f.act === 8 ? f.spin : 0));
-  if (f.ko) B = mR(B, 0, -f.kod * 1.45);
+  if (f.ko || f.kd) B = mR(B, 0, -(f.ko ? f.kod : f.kd) * 1.45);
   if (f.act === 2) B = mTr(mR(mTr(B, 0, 0.5, 0), 0, f.rl), 0, -0.5, 0);
   const wh = f.fl > 0;
   const WH = 0xffffff;
@@ -2194,7 +2185,7 @@ function pose(f) {
   const c2 = wh ? WH : PCOL2[f.i];
   const dk = wh ? WH : DK;
   const gd = wh ? WH : 0xb89a5c;
-  const air = (f.y > groundH(f.x, f.z) + 0.05 && !f.ko) || f.act === 2;
+  const air = (f.y > 0 + 0.05 && !f.ko) || f.act === 2;
   const hy = 0.93 - Q[12] - (air ? 0 : abs(sin(f.wk)) * 0.05 * f.mv);
   const cf = cos(f.face);
   const sf = sin(f.face);
@@ -2255,7 +2246,7 @@ function pose(f) {
   const lit = wh || (f.act === 7 && f.pw >= 1);
   box(G, 0, -0.58, 0, 0.042, 0.5, 0.011, lit ? 0xfff4d8 : 0xdfe4f2, lit ? 2 : mt, 1.2);
   const tip = mPt(G, 0, -1.08, 0);
-  if (f.act === 1 || f.act === 5 || f.act === 8) {
+  if (f.act === 1 || f.act === 5 || f.act > 7) {
     f.trail.unshift([mPt(G, 0, -0.55, 0), tip]);
     if (f.trail.length > 5) f.trail.pop();
   } else f.trail = [];
@@ -2274,21 +2265,157 @@ function itemBoxes(t) {
   m[9] = t.x;
   m[10] = t.y + 0.45 + (t.st === 2 ? sin(T * 3 + t.x) * 0.1 : 0);
   m[11] = t.z;
-  const c = ITC[t.k];
-  if (t.k === 1) {
-    box(m, 0, 0, 0, 0.13, 0.18, 0.13, c, 2);
-    box(m, 0, 0.24, 0, 0.06, 0.07, 0.06, 0xc89070);
-  } else if (t.k === 2) {
-    box(mR(m, 0, 0.6), 0, 0, 0, 0.2, 0.2, 0.2, c);
-    box(m, 0, 0.26, 0, 0.03, 0.08, 0.03, 0xffa040, 2);
-  } else if (t.k === 3) box(mR(m, 2, 0.4), 0, 0, 0, 0.06, 0.26, 0.16, c, 2);
-  else if (t.k === 4) {
-    box(mR(m, 0, PI / 4), 0, 0, 0, 0.12, 0.12, 0.12, c, 2);
-    box(mR(m, 2, PI / 4), 0, 0, 0, 0.09, 0.2, 0.09, 0xb9a2ff, 2);
-  } else {
-    box(mR(m, 2, T * 6), 0, 0, 0, 0.26, 0.04, 0.04, c, 2);
-    box(mR(m, 2, T * 6 + PI / 2), 0, 0, 0, 0.26, 0.04, 0.04, c, 2);
+  box(mR(m, 0, PI / 4), 0, 0, 0, 0.15, 0.15, 0.15, ITC[t.k], t.k === 2 ? 0 : 2);
+  box(m, 0, 0.24, 0, 0.04, 0.06, 0.04, 0xffa040, 2);
+}
+
+// --- Remates ---
+// Tras una parada perfecta el rival queda atontado: 1 espada, 2 escudo, 4 hechizo.
+// Cámara cercana de costado, franjas de cine y cámara lenta. Nunca matan: dejan al menos 1 de vida.
+let FIN = null;
+const SWS = [
+  [0, 0, 0.22, 0.32],
+  [1, 0.32, 0.44, 0.54],
+  [2, 0.54, 0.92, 1.02],
+];
+function startFin(a, b, k) {
+  const g = atan2(b.x - a.x, b.z - a.z);
+  const s = a.sp;
+  a.x = b.x - sin(g) * 1.25;
+  a.z = b.z - cos(g) * 1.25;
+  a.face = g;
+  b.face = g + PI;
+  a.act = 9;
+  a.trail = [];
+  b.act = b.tn = 0;
+  if (k === 4) {
+    a.mana -= 1;
+    a.sp = (s + 1) % 3;
   }
+  FIN = {
+    a, b, k, s, t: 0, h: -1,
+    yw: g + (abs(angD(CAM.yw, g + PI / 2)) < PI / 2 ? PI / 2 : -PI / 2),
+    n: k === 1 ? 'TRIPLE TAJO' : k === 2 ? 'ESCUDAZO' : ['PRISIÓN DE HIELO', 'COLUMNA DE FUEGO', 'PESO DEL CIELO'][s],
+  };
+  SFX.full();
+}
+function finHit(b, dmg, last) {
+  b.hp = max(1, b.hp - dmg);
+  b.gt = 0.7;
+  b.fl = 0.08;
+  FIN.h = FIN.t;
+  ftxt(b.x, 2.4, b.z, dmg, PC[17]);
+  burst(b.x, 1.2, b.z, 18, 6, 0.4, 0.07, 0xfff4d8, 1 | 2 | 4);
+  SFX.hit(1.3);
+  SHK = last ? 0.6 : 0.3;
+  FLASH = last ? 40 : 14;
+  if (last) {
+    IMP = 3;
+    burst(b.x, 0.1, b.z, 40, 6, 0.9, 0.1, 0xe8ecf8, 2 | 8, 3);
+    stamp(b.x, b.z, 1.3, 96, 100, 132, 0.6);
+    SFX.boom(0.6);
+  }
+}
+function finStep(dt) {
+  const { a, b, k, s } = FIN;
+  const t0 = FIN.t;
+  const t = (FIN.t += dt);
+  b.fl = max(0, b.fl - dt);
+  b.gt -= dt;
+  for (const q of FT) q.t -= dt;
+  const ev = (x) => t0 < x && t >= x;
+  const V = stunA();
+  let A;
+  if (k === 1) {
+    // tres tajos; el último, de arriba, en cámara lenta
+    const [c, s0, we, se] = SWS.filter((q) => q[1] <= t).pop();
+    A = atkPose(c, t < we ? (t - s0) / (we - s0) - 1 : min(1, (t - we) / (se - we)));
+    SWS.forEach((q, i) => ev(q[3] - 0.04) && finHit(b, [8, 8, 11][i], i > 1));
+    TSC = t > 0.7 && t < 0.97 ? 0.35 : 1;
+  } else if (k === 2) {
+    // dos golpes de escudo y un salto que lo aplasta
+    const p = max(0, 1 - abs(t - 0.26) / 0.08) + max(0, 1 - abs(t - 0.48) / 0.08);
+    const j = cl((t - 0.62) / 0.38, 0, 1);
+    a.y = sin(PI * j) * 1.3;
+    A = j > 0 && j < 1 ? [0.3, 0.7, -0.1, 0, 1.2, -0.04, j < 0.75 ? 0.95 : 0.3, 0.3, 0, -1.4, 0, 0.1 + j * 0.2, 0.1, 0.2] : [0.3, 0.25, -0.1, 0.3, 0.9, -0.02, 0.4, 0.3 + p * 0.35, 0, 0.05, -0.2, 0.1 + p * 0.25, t > 1 ? 0.3 : 0.08, 0];
+    if (ev(0.26) || ev(0.48)) finHit(b, 6, 0);
+    if (ev(1)) {
+      finHit(b, 9, 1);
+      for (let i = 0; i < 24; i++) part(b.x, 0.1, b.z, cos(i / 3.82) * 7, 1, sin(i / 3.82) * 7, 0.45, 0.12, 0xe8ecf8, 4 | 8);
+    }
+    TSC = t > 0.75 && t < 0.98 ? 0.4 : 1;
+  } else {
+    // el hechizo activo, concentrado: hielo, fuego o lentitud
+    const c = SPC[s];
+    A = t < 0.8 ? [0.16, 1.05, 0.12, 0, 1.5, -0.3, 0.1, 0.1, -1.2, 0, 0, -0.08, 0, -0.2] : [0.12, 0.45, 0.52, 0, 0.12, -0.28, 0.42, 0.3, -0.2, -0.6, 0, 0.1, 0.06, 0];
+    const tp = a.tip;
+    if (t < 0.85 && tp) {
+      const g = rnd() * TAU;
+      const r = rr(1.5, 3);
+      const x = a.x + cos(g) * r;
+      const z = a.z + sin(g) * r;
+      const y = rr(0, 3);
+      part(x, y, z, (tp[0] - x) * 2.5, (tp[1] - y) * 2.5, (tp[2] - z) * 2.5, 0.4, 0.07, c, 1);
+    }
+    if (ev(0.95)) {
+      finHit(b, 15, 1);
+      burst(b.x, 1, b.z, 60, s === 1 ? 3 : 7, 1, 0.12, c, 1 | 4, s === 1 ? 6 : 1);
+      stamp(b.x, b.z, 1.5, s ? 64 : 236, s ? 60 : 246, s ? 76 : 255, 0.7);
+      if (!s) b.frz = 0.9;
+    }
+    if (t > 0.95) {
+      if (s === 1) part(b.x + rr(-0.6, 0.6), 0.1, b.z + rr(-0.6, 0.6), 0, rr(4, 8), 0, rr(0.3, 0.6), rr(0.12, 0.25), rnd() < 0.5 ? 0xff6a20 : 0xffc048, 1 | 16);
+      if (s === 2) {
+        b.y = sin(min(1, (t - 0.95) / 0.5) * PI) * 0.8;
+        const g = rnd() * TAU;
+        part(b.x + cos(g) * 2.5, 0.2, b.z + sin(g) * 2.5, -cos(g) * 6, 1, -sin(g) * 6, 0.4, 0.07, c, 1);
+      }
+    }
+    TSC = t > 0.55 && t < 0.92 ? 0.4 : 1;
+  }
+  if (FIN.h >= 0 && t - FIN.h < 0.12) {
+    V[11] = -0.45;
+    V[13] = -0.4;
+  }
+  if (t > (k === 4 ? 1.1 : 1) && !(k === 4 && !s)) b.kd = min(1, b.kd + dt * 5);
+  const q = 1 - exp(-50 * dt);
+  for (let i = 0; i < 14; i++) {
+    a.Q[i] += (A[i] - a.Q[i]) * q;
+    b.Q[i] += (V[i] - b.Q[i]) * q;
+  }
+  if (t > (k === 4 ? 1.75 : 1.55)) {
+    a.act = 0;
+    a.y = b.y = 0;
+    b.stun = 0;
+    b.hs = 0.6;
+    b.inv = 0.8;
+    if (s === 1 && k === 4) {
+      b.burn = 3;
+      b.bt = 0.5;
+    }
+    if (s === 2 && k === 4) b.slow = 5;
+    TSC = 1;
+    FIN = null;
+  }
+}
+
+// La meseta se desmorona en los últimos 20 segundos (solo entre dos personas)
+let ES = 1;
+let ESa = 1;
+let GA0 = null;
+function crumble() {
+  for (let i = 0; i < 2560; i++) {
+    const a = (i / 2560) * TAU;
+    const r0 = rad0(a);
+    for (let r = r0 * ES; r < r0 * ESa + 0.06; r += 0.03) GA[(((sin(a) * r + TH) * TK) | 0) * TS + (((cos(a) * r + TH) * TK) | 0)] = 0;
+    if (!(i % 40)) part(cos(a) * r0 * ES, 0, sin(a) * r0 * ES, rr(-1, 1), rr(0, 2), rr(-1, 1), 2.5, rr(0.12, 0.3), rnd() < 0.5 ? 0xd8dcee : 0x6a6280, 2);
+  }
+  for (const o of OB)
+    if (o.al && hypot(o.x, o.z) + o.r > rad(atan2(o.z, o.x))) {
+      o.al = 0;
+      burst(o.x, 0.6, o.z, 30, 3, 1.5, 0.15, 0xd8e2fa, 2, 1);
+    }
+  IT = IT.filter((t) => onPlat(t.x, t.z));
 }
 
 // --- Paso de simulación ---
@@ -2304,8 +2431,19 @@ function step(dt) {
     WG.gain.value = 0.035 + 0.025 * sin(T * 0.37) * sin(T * 0.13);
     WF.frequency.value = 330 + 120 * sin(T * 0.21);
   }
+  if (mode === 'title' && (hit.P1_U || hit.P1_D)) {
+    MSEL ^= 1;
+    SFX.ui();
+  }
+  if (mode === 'title' && MSEL && (hit.START1 || hit.P1_1)) hit.START2 = 1;
   if (mode === 'title' || phase === 'end') {
-    if (hit.START1 || (phase === 'end' && PT > 1.5 && hit.P1_1)) {
+    if (hit.START2 || (phase === 'end' && PT > 1.5 && hit.P2_1)) {
+      lvl = 0;
+      newMatch('vs');
+      SFX.ui();
+      return;
+    }
+    if (hit.START1 || hit.P1_1 * (mode === 'title' || PT > 1.5)) {
       if (phase === 'end' && mode === 'solo' && winner === 0) newMatch('solo');
       else if (phase === 'end' && mode === 'vs') newMatch('vs');
       else {
@@ -2313,12 +2451,6 @@ function step(dt) {
         streak = 0;
         newMatch('solo');
       }
-      SFX.ui();
-      return;
-    }
-    if (hit.START2 || (phase === 'end' && PT > 1.5 && hit.P2_1)) {
-      lvl = 0;
-      newMatch('vs');
       SFX.ui();
       return;
     }
@@ -2334,8 +2466,20 @@ function step(dt) {
     PT = 0;
     if (mode !== 'title') say('¡A PELEAR!', 0.9);
   }
-  if (phase === 'fight') {
+  if (phase === 'fight' && !FIN) {
     TM -= dt;
+    if (mode === 'vs' && TM < 20) {
+      if (ES === 1) {
+        say('¡LA MESETA SE DESMORONA!', 1.6);
+        SFX.boom(0.5);
+      }
+      ES = 1 - ((20 - TM) / 20) * 0.55;
+      SHK = max(SHK, 0.06);
+      if (ESa - ES > 0.008) {
+        crumble();
+        ESa = ES;
+      }
+    }
     if (TM <= 0) {
       TM = 0;
       const [a, b] = FS;
@@ -2379,6 +2523,12 @@ function step(dt) {
       lvl = 0;
       newMatch('title');
     }
+  }
+  if (FIN) {
+    finStep(dt);
+    stepParts(dt);
+    camStep(dt);
+    return;
   }
   // luchadores
   const [A, B] = FS;
@@ -2481,7 +2631,7 @@ function step(dt) {
     b.y += b.vy * dt;
     b.z += b.vz * dt;
     part(b.x, b.y + 0.3, b.z, 0, 1, 0, 0.3, 0.06, 0xffb040, 1);
-    if (b.y < groundH(b.x, b.z) + 0.2 || blockedAt(b.x, b.z, b.y)) {
+    if (b.y < 0 + 0.2 || blockedAt(b.x, b.z, b.y)) {
       b.dead = 1;
       if (onPlat(b.x, b.z) || b.y > -1) boom(b.x, b.z, b.o);
     }
@@ -2556,7 +2706,7 @@ function step(dt) {
         const x = cos(a) * r;
         const z = sin(a) * r;
         if (OB.some((o) => o.al && hypot(o.x - x, o.z - z) < o.r + 0.9)) continue;
-        IT.push({ x, z, y: 16, vy: 0, k: 1 + ((rnd() * 5) | 0), st: 0, t: 0 });
+        IT.push({ x, z, y: 16, vy: 0, k: 1 + ((rnd() * 4) | 0), st: 0, t: 0 });
         SFX.chime();
         break;
       }
@@ -2568,7 +2718,7 @@ function step(dt) {
     if (t.st === 1) {
       t.vy -= 30 * dt;
       t.y += t.vy * dt;
-      const g = groundH(t.x, t.z);
+      const g = 0;
       if (t.y <= g) {
         t.y = g;
         t.st = 2;
@@ -2589,22 +2739,6 @@ function step(dt) {
     }
   }
   IT = IT.filter((t) => !t.dead);
-  // cóndor
-  condT -= dt;
-  if (condT <= 0 && !COND) {
-    const a = rnd() * TAU;
-    COND = { x: cos(a) * 26, z: sin(a) * 26, a: a + PI + rr(-0.4, 0.4), t: 0 };
-    SFX.condor();
-  }
-  if (COND) {
-    COND.t += dt;
-    COND.x += cos(COND.a) * 7 * dt;
-    COND.z += sin(COND.a) * 7 * dt;
-    if (COND.t > 8) {
-      COND = null;
-      condT = rr(20, 35);
-    }
-  }
   for (const t of FT) t.t -= dt;
   FT = FT.filter((t) => t.t > 0);
   stepParts(dt);
@@ -2621,7 +2755,14 @@ function camStep(dt) {
   let pt;
   const px = (f) => (f.fall ? cl(f.x, -12, 12) : f.x);
   const pz = (f) => (f.fall ? cl(f.z, -12, 12) : f.z);
-  if (mode === 'title') {
+  if (FIN) {
+    // remate: cámara de costado que se acerca y gira despacio
+    tx = (FIN.a.x + FIN.b.x) / 2;
+    tz = (FIN.a.z + FIN.b.z) / 2;
+    d = 5.4 - FIN.t * 0.7;
+    yw = FIN.yw + FIN.t * 0.3;
+    pt = 0.42;
+  } else if (mode === 'title') {
     tx = 0;
     tz = 0;
     d = 26;
@@ -2653,12 +2794,13 @@ function camStep(dt) {
     }
     tz += 0.6;
   }
-  const k = 1 - exp(-4 * dt);
+  const f = FIN ? 3 : 1;
+  const k = 1 - exp(-4 * f * dt);
   CAM.x += (tx - CAM.x) * k;
   CAM.z += (tz - CAM.z) * k;
-  CAM.d += (d - CAM.d) * (1 - exp(-(phase === 'intro' ? 1.6 : 2.6) * dt));
-  CAM.yw += angD(CAM.yw, yw) * (1 - exp(-2 * dt));
-  CAM.pt += (pt - CAM.pt) * (1 - exp(-1.5 * dt));
+  CAM.d += (d - CAM.d) * (1 - exp(-(phase === 'intro' ? 1.6 : 2.6) * f * dt));
+  CAM.yw += angD(CAM.yw, yw) * (1 - exp(-2 * f * dt));
+  CAM.pt += (pt - CAM.pt) * (1 - exp(-1.5 * f * dt));
 }
 
 // --- Dibujo ---
@@ -2669,6 +2811,12 @@ function render() {
   SM.fill(0);
   nB = 0;
   for (const f of FS) pose(f);
+  if (FIN && FIN.k === 4 && !FIN.s && FIN.t > 0.95) {
+    // prisión de hielo: cristales que brotan alrededor
+    const { b } = FIN;
+    const h = min(1, (FIN.t - 0.95) * 6) * 1.1;
+    for (let i = 0; i < 7; i++) box(mR(mR(mTr(ID, b.x + cos(i) * 0.5, 0, b.z + sin(i) * 0.5), 1, i), 0, -0.3), 0, h * (1 + (i % 3) * 0.3), 0, 0.16, h * (1 + (i % 3) * 0.3), 0.16, 0x8ff0ff, 1, 0.12);
+  }
   for (const t of IT) if (t.st) itemBoxes(t);
   for (const b of BM) {
     const m = mR(mTr(ID, b.x, b.y, b.z), 0, b.t * 9);
@@ -2677,7 +2825,6 @@ function render() {
   // sombras: obstáculos, cajas, nubes y cóndor
   drawMesh(OBM, 1);
   drawBoxes(1);
-  if (COND) condor(1);
   floorPass();
   // luces sobre la nieve
   for (const p of PJ) glow(p.x, p.z, p.k === 2 ? 2.4 : 1.8, sc3(SPC[p.k], 0.5));
@@ -2690,7 +2837,8 @@ function render() {
     if (f.burn > 0 && !f.fall) glow(f.x, f.z, 1.6, sc3(0xff7020, 0.3));
     if (f.act === 3 || f.act === 7) glow(f.x, f.z, 1.4, f.act === 3 ? sc3(SPC[f.sp], 0.3) : sc3(f.pw >= 1 ? 0xfff0c0 : 0x9fb8ff, 0.12 + f.pw * 0.2));
   }
-  drawMesh(WALL);
+  if (FIN && FIN.k === 4) glow(FIN.b.x, FIN.b.z, 1 + FIN.t, sc3(SPC[FIN.s], min(0.5, FIN.t * 0.5)));
+  drawMesh(WALL, 0, ES);
   drawMesh(OBM);
   drawBoxes(0);
   // estelas de espada
@@ -2748,7 +2896,6 @@ function render() {
     for (let i = 0; i + 1 < b.pts.length; i++) {
       const [x0, y0, z0] = b.pts[i];
       const [x1, y1, z1] = b.pts[i + 1];
-      line3(x0, y0, z0, x1, y1, z1, sc3(0xb8a0ff, min(1, b.t * 4) * 0.5), 7);
       line3(x0, y0, z0, x1, y1, z1, sc3(0xfff6d0, min(1, b.t * 5)), 3);
       line3(x0, y0, z0, x1, y1, z1, 0xffffff, 1);
     }
@@ -2770,74 +2917,57 @@ function render() {
   }
   drawParts();
   snow(0, CAM.x, CAM.z);
-  if (COND) condor(0);
   const fd = phase === 'boot' ? 16 : FD;
   present(FLASH, fd, IMP > 0);
   overlay();
 }
 
-// Cóndor: una silueta enorme que cruza entre la cámara y la meseta
-function condor(sh) {
-  const c = COND;
-  const y = 5.4 + sin(c.t * 0.7) * 0.4;
-  const fx = cos(c.a);
-  const fz = sin(c.a);
-  const rx = -fz;
-  const rz = fx;
-  const fl = sin(c.t * 2.2) * 0.7;
-  const pts = [
-    [0, 0, 1.5],
-    [0, 0, -1.3],
-    [1.6, fl * 0.4, 0.35],
-    [4.4, fl, 0],
-    [4.2, fl, -0.35],
-    [4, fl, -0.7],
-    [3.7, fl, -1.1],
-    [1.1, 0.1, -0.9],
-    [5.6, fl * 1.15, -0.25],
-    [5.4, fl * 1.15, -0.7],
-    [5, fl * 1.1, -1.15],
-  ];
-  const tris = [[0, 2, 7], [0, 7, 1], [2, 3, 6], [2, 6, 7], [3, 4, 8], [4, 5, 9], [5, 6, 10]];
-  for (const s of [-1, 1]) {
-    const W = pts.map(([a, h, b]) => [c.x + (rx * a * s + fx * b) * 0.55, y + h * 0.55, c.z + (rz * a * s + fz * b) * 0.55]);
-    for (const [p, q, r] of tris) {
-      const S = [p, q, r].map((i) => {
-        const [x, yy, z] = W[i];
-        return sh ? P(x - (LX / LY) * yy, 0, z - (LZ / LY) * yy) && [_x, _y, _z] : P(x, yy, z) && [_x, _y, _z];
-      });
-      if (!S[0] || !S[1] || !S[2]) continue;
-      if (sh) stri(S[0][0], S[0][1], S[1][0], S[1][1], S[2][0], S[2][1]);
-      else {
-        const col = p === 2 && q === 6 ? 0xc4c8d6 : 0x1c1e28;
-        tri(S[0][0], S[0][1], S[0][2], S[1][0], S[1][1], S[1][2], S[2][0], S[2][1], S[2][2], col, col, col, 0);
-      }
-    }
-  }
-}
-
 // --- Interfaz sobre el tramado ---
 
+const CTL = [
+  ['ATACAR', 'MANTÉN: CARGA'],
+  ['ESCUDO', 'A TIEMPO: PARADA'],
+  ['RODAR', 'ESQUIVA TODO'],
+  ['HECHIZO', 'HIELO FUEGO LENTO'],
+  ['SALTAR', '+1: EN PICADA'],
+  ['OBJETO', 'CAEN DEL CIELO'],
+];
 function overlay() {
-  for (const t of FT) {
-    if (P(t.x, t.y + (0.9 - t.t) * 1.2, t.z)) txt(t.s, _x, _y, t.c, 1, 1, 0.5);
-  }
-  LB = mix(LB, phase === 'fight' && mode !== 'title' ? 0 : 22, 0.08);
+  if (mode !== 'title') for (const t of FT) if (P(t.x, t.y + (0.9 - t.t) * 1.2, t.z)) txt(t.s, _x, _y, t.c, 1, 1, 0.5);
+  LB = mix(LB, phase === 'fight' && mode !== 'title' && !FIN ? 0 : 22, 0.08);
   if (LB > 0.5) {
     fill(0, 0, FW, LB, PC[0]);
     fill(0, FH - LB, FW, LB + 1, PC[0]);
   }
   const blink = (T * 2.2) & 1;
   if (mode === 'title') {
-    txt('PENITENTES', FW / 2, 50, PC[14], 4, 9, 0.5);
-    txt('DUELO EN LA ALTA CORDILLERA', FW / 2, 106, PC[8], 1, 2, 0.5);
-    if (blink) {
-      txt('START 1 · UN JUGADOR', FW / 2, 196, PC[9], 1, 2, 0.5);
-      txt('START 2 · DOS JUGADORES', FW / 2, 214, PC[9], 1, 2, 0.5);
-    }
-    txt('1 ATACAR · MANTÉN PARA CARGAR    2 ESCUDO · A TIEMPO: PARADA', FW / 2, 246, PC[7], 1, 1, 0.5);
-    txt('3 RODAR   4 HECHIZO   5 SALTAR   6 USAR OBJETO', FW / 2, 256, PC[7], 1, 1, 0.5);
-    if (best) txt('RÉCORD CONTRA LA MÁQUINA: ' + best, FW / 2, 285, PC[13], 1, 1, 0.5);
+    // degradado tramado hacia abajo para que el menú se lea sobre la pelea de fondo
+    for (let y = 128; y < FH; y++) for (let x = 0; x < FW; x++) if (BAY[((y & 3) << 2) | (x & 3)] < (y - 128) / 11) O32[y * FW + x] = PC[1];
+    txt('PENITENTES', FW / 2, 32, PC[14], 4, 9, 0.5);
+    txt('DUELO EN LA ALTA CORDILLERA', FW / 2, 86, PC[8], 1, 2, 0.5);
+    ['UN JUGADOR', 'DOS JUGADORES'].forEach((s, i) => {
+      const on = MSEL === i;
+      txt(s, FW / 2, 140 + i * 18, on ? PC[14] : PC[5], 2, 2, 0.5);
+      if (on && blink) {
+        txt('>', FW / 2 - s.length * 4 - 12, 140 + i * 18, PC[14], 2, 2);
+        txt('<', FW / 2 + s.length * 4 + 6, 140 + i * 18, PC[14], 2, 2);
+      }
+    });
+    txt('STICK Y BOTÓN 1  ·  START 1  ·  START 2', FW / 2, 180, PC[5], 1, 1, 0.5);
+    // los seis botones como en el gabinete
+    CTL.forEach(([a, b], i) => {
+      const x = 26 + (i % 3) * 128;
+      const y = 204 + (i > 2) * 30;
+      for (let j = -5; j <= 5; j++) for (let k = -5; k <= 5; k++) if (j * j + k * k < 28) O32[(y + 5 + j) * FW + x + k] = PC[13];
+      txt(i + 1, x, y + 3, PC[1], 1, 1, 0.5, 0);
+      txt(a, x + 9, y, PC[9], 1, 2);
+      txt(b, x + 9, y + 12, PC[6], 1, 1);
+    });
+    if (best) txt('RÉCORD CONTRA LA MÁQUINA · ' + best, FW / 2, FH - 15, PC[13], 1, 1, 0.5);
+    return;
+  }
+  if (FIN) {
+    txt(FIN.n, FW / 2, FH - 17, PC[14], 2, 2, 0.5);
     return;
   }
   // barras de vida, maná, hechizo y objeto
@@ -2864,9 +2994,15 @@ function overlay() {
     txt(SPN[f.sp], L ? x0 + 30 : x0 + w - 30, y0 + 9, SPI[f.sp], 1, 1, L ? 0 : 1);
     if (f.item) txt(ITN[f.item], L ? x0 + 64 : x0 + w - 64, y0 + 9, ITI[f.item], 1, 1, L ? 0 : 1);
   }
+  for (const f of FS) {
+    const o = FS[1 - f.i];
+    if (!f.cpu && o.tn && o.stun > 0 && hypot(o.x - f.x, o.z - f.z) < 2.6 && P(o.x, o.y + 2.6, o.z)) {
+      txt('¡REMATE!', _x, _y - 12, blink ? PC[17] : PC[14], 1, 2, 0.5);
+      txt('1 ESPADA · 2 ESCUDO · 4 HECHIZO', _x, _y, PC[9], 1, 1, 0.5);
+    }
+  }
   txt(ceil(TM), FW / 2, 6, TM < 10 && blink ? PC[15] : PC[9], 2, 3, 0.5);
   if (phase === 'intro' && PT > 0.3) txt('RONDA ' + RND, FW / 2, 120, PC[14], 3, 6, 0.5);
-  if (phase === 'intro' && RND === 1) txt('1 ATACAR/CARGAR · 2 ESCUDO · 3 RODAR · 4 HECHIZO · 5 SALTAR · 6 OBJETO', FW / 2, FH - 14, PC[7], 1, 1, 0.5);
   if (msgT > 0) txt(msg, FW / 2, 120, msg === '¡A PELEAR!' ? PC[9] : PC[17], 3, 6, 0.5);
   if (phase === 'end') {
     const w = winner;
@@ -2899,7 +3035,6 @@ function bootStep() {
     fill(FW / 2 - 80, 160, (160 * p) | 0, 2, PC[13]);
     const lab = ti < TASKS.length ? TASKS[ti][0] : 'LISTO';
     txt(lab, FW / 2, 168, PC[6], 1, 1, 0.5);
-    txt(((ti * 32768) / 1e3).toFixed(0) + ' MIL TEXELES', FW / 2, 180, PC[4], 1, 1, 0.5);
   }
   if (ti >= TASKS.length) {
     phase = 'title';
