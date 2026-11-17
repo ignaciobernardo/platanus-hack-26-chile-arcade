@@ -1346,7 +1346,6 @@ let SHK = 0;
 let IMP = 0;
 let FLASH = 0;
 let FD = 16;
-let LB = 0;
 let TM = 60;
 let RND = 0;
 let lvl = 0;
@@ -2959,8 +2958,6 @@ const CTL = [
 ];
 function overlay() {
   if (mode !== 'title') for (const t of FT) if (P(t.x, t.y + (0.9 - t.t) * 1.2, t.z)) txt(t.s, _x, _y, t.c, 1, 1, 0.5);
-  LB = mix(LB, phase === 'fight' && mode !== 'title' && !FIN ? 0 : 22, 0.08);
-  if (LB > 0.5) fill(0, FH - LB, FW, LB + 1, PC[0]);
   const blink = (T * 2.2) & 1;
   if (mode === 'title') {
     // degradado tramado hacia abajo para que el menú se lea sobre la pelea de fondo
