@@ -24,6 +24,8 @@ const angD = (a, b) => {
 };
 const pk = (r, g, b) => (cl(r | 0, 0, 255) << 16) | (cl(g | 0, 0, 255) << 8) | cl(b | 0, 0, 255);
 const sc3 = (c, k) => pk((c >> 16) * k, ((c >> 8) & 255) * k, (c & 255) * k);
+// poses guardadas como texto: cada carácter es un número (código - 79) / 25
+const pz = (s) => [...s].map((c) => (c.charCodeAt() - 79) / 25);
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 // To add local testing shortcuts, append extra keys to any array.
@@ -121,7 +123,6 @@ const Q = new Uint8Array(512);
 for (let i = 0; i < 512; i++) Q[i] = cl(i - 96, 0, 255) >> 3;
 const BAY = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 const DO = BAY.map((b) => ((b - 7.5) * 3.3) | 0);
-const VG = new Uint8Array(NP);
 
 function buildLut() {
   const P = PAL.map((c) => [c >> 16, (c >> 8) & 255, c & 255]);
@@ -143,12 +144,6 @@ function buildLut() {
     }
     LUT[i] = 0xff000000 | (bc[2] << 16) | (bc[1] << 8) | bc[0];
   }
-  for (let y = 0; y < FH; y++)
-    for (let x = 0; x < FW; x++) {
-      const dx = (x - FW / 2) / (FW / 2);
-      const dy = (y - FH / 2) / (FH / 2);
-      VG[y * FW + x] = cl((dx * dx * 0.6 + dy * dy * 0.8 - 0.35) * 46, 0, 36);
-    }
 }
 
 // --- Lienzo: color, profundidad (1/z) y máscara de sombras ---
@@ -321,7 +316,7 @@ function present(fl, fd, imp) {
       if (BAY[b] < fd) o[i] = PC[0];
       else if (imp) o[i] = CR[i] * 0.3 + CG[i] * 0.55 + CB[i] * 0.15 + DO[b] * 3 > 150 ? PC[14] : PC[1];
       else {
-        const t = DO[b] + 96 + fl - VG[i];
+        const t = DO[b] + 96 + fl;
         o[i] = LUT[(Q[CR[i] + t] << 10) | (Q[CG[i] + t] << 5) | Q[CB[i] + t]];
       }
     }
@@ -1270,10 +1265,6 @@ const SFX = {
     tone(440, 0.7, 's', 0.12, 160);
     tone(446, 0.7, 's', 0.1, 163);
   },
-  freeze: () => {
-    noise(0.25, 0.3, 5000, 'h');
-    [2637, 1976, 1568].forEach((f, i) => tone(f, 0.4, 't', 0.07, 0, i * 0.05));
-  },
   shatter: () => {
     noise(0.35, 0.35, 3500, 'h');
     [3520, 2960, 4186].forEach((f, i) => tone(f, 0.2, 'q', 0.03, 0, i * 0.04));
@@ -1385,8 +1376,8 @@ function mkF(i) {
     i, x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, kx: 0, kz: 0, face: 0, hp: 100, gh: 100, gt: 0, mana: 1, sp: 0,
     item: 0, act: 0, at: 0, cmb: 0, q: 0, hd: 0, blk: 0, stun: 0, frz: 0, burn: 0, bt: 0, slow: 0,
     hs: 0, inv: 0, fl: 0, fall: 0, ko: 0, kod: 0, wk: 0, mv: 0, trail: [], w: 0, pw: 0, pf: 0, spin: 0, rl: 0,
-    rb: 0, rx: 0, rz: 0, bst: 9, pbc: 0, gb: 0, dg: 0, aid: 0, pa: -1, plan: 0, hold: 0, tn: 0, kd: 0,
-    Q: [0.22, 0.2, 0.3, -0.25, 0.55, -0.21, 0.17, 0.25, -0.4, 0, 0, 0.05, 0.04, 0],
+    rb: 0, rx: 0, rz: 0, bst: 9, pbc: 0, gb: 0, dg: 0, aid: 0, pa: -1, plan: 0, hold: 0, tn: 0, kd: 0, hang: 0,
+    Q: pz('UTWI]JSUEOOPPO'),
     bq: 0, bqt: 0, cpu: 0, ct: 0, side: 1, skl: 0.6, lag: 1, ci: { mx: 0, mz: 0, p: [], blk: 0, hu: 0 },
   };
 }
@@ -1486,6 +1477,10 @@ function cpuIn(f, o, dt) {
     I.mx = I.mz = I.blk = 0;
     return I;
   }
+  if (f.fall || f.hang) {
+    I.p[5] = rnd() < (f.hang ? 0.04 : f.skl * 0.15);
+    return I;
+  }
   const dx = o.x - f.x;
   const dz = o.z - f.z;
   const d = hypot(dx, dz) || 1;
@@ -1537,10 +1532,8 @@ function cpuIn(f, o, dt) {
   } else if (o.blk && d < 2.4 && rnd() < 0.45) {
     I.p[1] = 1;
     f.hold = 0.95;
-  } else if (f.item && rnd() < 0.3) {
-    const it = f.item;
-    if ((it === 1 && f.hp < 60) || (it === 2 && d > 3 && d < 9) || it === 3 || (it === 4 && d < 5)) I.p[6] = 1;
-  } else if (f.mana >= 1 && d > 3.2 && rnd() < 0.3) I.p[4] = 1;
+  } else if (f.item && rnd() < 0.15) I.p[6] = 1;
+  else if (f.mana >= 1 && d > 3.2 && rnd() < 0.3) I.p[4] = 1;
   else if (f.y > 0.6 && d < 3) I.p[1] = 1;
   else if (d < 2.1) {
     const r = rnd();
@@ -1589,6 +1582,8 @@ const ATA = [
 ];
 const ATK = [7, 7, 12];
 const ATB = [3, 3, 8];
+// colgado: manos arriba en el borde, cabeza mirando hacia arriba
+const HANG = pz('T_VOmJ_VO1OQOF');
 const ease = (k) => k * k * (3 - 2 * k);
 // Pose de un tajo: c combo (0 derecha a izquierda, 1 revés, 2 de arriba), k -1..0 preparación, 0..1 golpe
 function atkPose(c, k) {
@@ -1673,6 +1668,11 @@ function hurt(B, sx, sz, dmg, kb, hst, fl = 0, A = null) {
   B.kz += uz * kb;
   if (fl & 4) B.vy = max(B.vy, 5.5);
   B.hs = max(B.hs, hst);
+  if (B.hang) {
+    B.hang = 0;
+    B.fall = 1;
+    B.vy = -14;
+  }
   if (B.act !== 5) B.act = 0;
   B.blk = 0;
   B.hold = 0;
@@ -1717,7 +1717,7 @@ function startAtk(f, k) {
 function melee(f, o) {
   const dx = o.x - f.x;
   const dz = o.z - f.z;
-  return hypot(dx, dz) < 2.05 && abs(angD(f.face, atan2(dx, dz))) < 1.35 ? (f.cmb < 2 && o.y > 0.5 ? 2 : abs(o.y - f.y) < 1.4) : 0;
+  return hypot(dx, dz) < 2.05 && abs(angD(f.face, atan2(dx, dz))) < 1.35 ? (f.cmb < 2 && o.y > 0.5 ? 2 : abs(o.y - f.y) < 1.6) : 0;
 }
 
 function cast(f, o) {
@@ -1792,7 +1792,6 @@ function hitObs(x, z, r, dmg) {
   OB.forEach((o) => {
     if (!o.al || o.k || hypot(o.x - x, o.z - z) > o.r + r) return;
     o.hp -= dmg;
-    burst(o.x, 1.2, o.z, 14, 4, 0.6, 0.08, 0xdfe8ff, 2 | 8);
     if (o.hp <= 0) {
       o.al = 0;
       burst(o.x, 1.2, o.z, 70, 6, 1.4, 0.12, 0xd8e2fa, 2 | 8, 3);
@@ -1876,7 +1875,28 @@ function upF(f, o, I, dt) {
       f.bqt = 0.18;
     }
   f.bqt -= dt;
+  if (f.hang > 0) {
+    // colgado del borde: 5 para trepar; si se acaba el agarre, cae
+    f.hang -= dt;
+    if (f.hang <= 0) f.fall = 1;
+    else if (I.p[5]) {
+      const g = atan2(f.z, f.x);
+      Object.assign(f, { hang: 0, y: 0.45, vy: 8, kx: -cos(g) * 4.5, kz: -sin(g) * 4.5 });
+      SFX.jump();
+    }
+    const k = 1 - exp(-20 * dt);
+    HANG.forEach((v, i) => (f.Q[i] += (v - f.Q[i]) * k));
+    return;
+  }
   if (f.fall) {
+    const g = atan2(f.z, f.x);
+    const r = rad(g) + 0.2;
+    if (f.fall < 2 && !f.ko && f.y > -3 && hypot(f.x, f.z) < r + 2.5 && I.p[5]) {
+      // agarrarse al borde antes de caer
+      Object.assign(f, { x: cos(g) * r, z: sin(g) * r, y: -1.5, vy: 0, kx: 0, kz: 0, fall: 0, hang: 2.5, face: atan2(-cos(g), -sin(g)) });
+      SFX.land();
+      return;
+    }
     f.vy -= 20 * dt;
     f.y += f.vy * dt;
     f.x += f.kx * dt;
@@ -2136,10 +2156,10 @@ function upF(f, o, I, dt) {
   let A = [0.22, 0.2 + br * 0.015, 0.3 + run * 0.1, -0.25, 0.55, -0.21, 0.17, 0.25 - run * 0.08, -0.4, 0, run * 0.12, 0.05 + f.mv * 0.14, 0.04 + br * 0.01, 0];
   let fast = 0;
   const t = f.at;
-  if (f.ko) A = [0.5, 0.15, 0.15, 1.2, -0.2, -0.5, 0.15, 0.1, -1.4, 0.4, 0, -0.1, 0, -0.3];
-  else if (f.gb > 0) A = [0.45, 0.6, -0.1, 0.6, 1, -0.62, 0.55, -0.2, -1.9, 0.3, -0.3, -0.3, 0, -0.3];
+  if (f.ko) A = pz('[SSmJCSQ,YOMOG');
+  else if (f.gb > 0) A = pz('Z^M^h?]J WGGOG');
   else if (f.stun > 0) A = stunA();
-  else if (f.hs > 0) A = [0.36, 0.25, 0.08, 0.6, 0.2, -0.36, 0.25, 0.08, -0.9, 0, 0, -0.32, 0.04, -0.3];
+  else if (f.hs > 0) A = pz('XUQ^TFUQ9OOGPG');
   else if (f.act === 1) {
     const [w0, w1] = ATA[f.cmb];
     fast = 1;
@@ -2149,17 +2169,17 @@ function upF(f, o, I, dt) {
     A = [0.42, 0.55, -0.3, 2.5, 0.35 + p * 0.3, -0.25, 0.35, 0.3, -0.2, 0, 0.7, 0.1, 0.12 + p * 0.1, 0];
   } else if (f.act === 8) {
     fast = 1;
-    A = [0.5, 0.38, 0.2, 1.35, -0.05, -0.36, 0.3, 0.05, -1.4, 0, 0, 0.12, 0.1, 0];
-  } else if (f.act === 2) A = [0.18, 0.15, 0.25, 0.8, -0.3, -0.2, 0.15, 0.2, -0.4, 0, 0, 0.2, 0.3, 0.3];
-  else if (f.act === 3) A = [0.12, 0.45, 0.52, 0, 0.12, -0.28, 0.42, 0.3, -0.2, -0.6, 0, 0.1, 0.06, 0];
+    A = pz('[YTqNFWP,OORQO');
+  } else if (f.act === 2) A = pz('SSUcGJSTEOOTWW');
+  else if (f.act === 3) A = pz('RZ]ORHYWJ@OQQO');
   else if (f.act === 4) {
     const k = cl(t / 0.14, 0, 1);
     fast = 1;
     A = [0.22, mix(1, 0.35, k), mix(-0.25, 0.5, k), 0, mix(1.8, -0.2, k), -0.25, 0.3, 0.2, -0.5, 0, mix(0.4, -0.3, k), mix(-0.2, 0.25, k), 0.05, 0];
-  } else if (f.act === 5) A = [0.08, 0.35, 0.35, 0, -1.35, -0.25, 0.4, 0.15, -0.6, 0, 0, 0.2, 0.2, 0.2];
-  else if (f.act === 6) A = [0.15, 0.1, 0.4, 0, -1.2, -0.25, 0.2, 0.2, -0.6, 0, 0, 0.35, 0.3, 0.2];
-  else if (f.blk) A = [0.27, 0.12, 0.04, 0.35, 1.25, -0.02, 0.36, 0.38, 0, 0.05, -0.2, 0.12, 0.12, 0.05];
-  else if (phase === 'end' && f.i === winner) A = [0.16, 1.05, 0.12, 0, 1.5, -0.3, 0.1, 0.1, -1.2, 0, 0, -0.08, 0, -0.15];
+  } else if (f.act === 5) A = pz('QXXO-IYS@OOTTT');
+  else if (f.act === 6) A = pz('SQYO1ITT@OOXWT');
+  else if (f.blk) A = pz('VRPXnOXYOPJRRP');
+  else if (phase === 'end' && f.i === winner) A = pz('SiROuGQQ1OOMOK');
   else if (!onG) {
     A[1] += 0.18;
     A[6] += 0.18;
@@ -2268,7 +2288,6 @@ function itemBoxes(t) {
   m[10] = t.y + 0.45 + (t.st === 2 ? sin(T * 3 + t.x) * 0.1 : 0);
   m[11] = t.z;
   box(mR(m, 0, PI / 4), 0, 0, 0, 0.15, 0.15, 0.15, ITC[t.k], t.k === 2 ? 0 : 2);
-  box(m, 0, 0.24, 0, 0.04, 0.06, 0.04, 0xffa040, 2);
 }
 
 // --- Remates ---
@@ -2349,7 +2368,7 @@ function finStep(dt) {
   } else {
     // el hechizo activo, concentrado: hielo, fuego o lentitud
     const c = SPC[s];
-    A = t < 0.8 ? [0.16, 1.05, 0.12, 0, 1.5, -0.3, 0.1, 0.1, -1.2, 0, 0, -0.08, 0, -0.2] : [0.12, 0.45, 0.52, 0, 0.12, -0.28, 0.42, 0.3, -0.2, -0.6, 0, 0.1, 0.06, 0];
+    A = t < 0.8 ? pz('SiROuGQQ1OOMOJ') : pz('RZ]ORHYWJ@OQQO');
     const tp = a.tip;
     if (t < 0.85 && tp) {
       const g = rnd() * TAU;
@@ -2499,7 +2518,7 @@ function step(dt) {
       const l = FS.find((f) => f.ko);
       const w = l ? FS[1 - l.i] : null;
       if (w) w.w++;
-      if (w && w.w >= 2) {
+      if (w && w.w >= 3) {
         winner = w.i;
         phase = 'end';
         PT = 0;
@@ -2591,7 +2610,7 @@ function step(dt) {
           if (p.k === 0) {
             f.frz = 1.15;
             f.act = 0;
-            SFX.freeze();
+            SFX.ice();
             ftxt(f.x, 2.6, f.z, 'CONGELADO', PC[19]);
           } else if (p.k === 1) {
             f.burn = 3;
@@ -2979,7 +2998,7 @@ function overlay() {
     const x0 = L ? 10 : FW - 10 - w;
     const y0 = 12;
     txt(f.i ? (mode === 'solo' ? 'CPU ' + f.lv : 'J2') : 'J1', L ? x0 : x0 + w, y0 - 8, PCI[f.i], 1, 1, L ? 0 : 1);
-    for (let k = 0; k < 2; k++) fill(L ? x0 + w - 6 - k * 6 : x0 + 2 + k * 6, y0 - 7, 4, 4, f.w > k ? PC[17] : PC[3]);
+    for (let k = 0; k < 3; k++) fill(L ? x0 + w - 6 - k * 6 : x0 + 2 + k * 6, y0 - 7, 4, 4, f.w > k ? PC[17] : PC[3]);
     fill(x0 - 1, y0 - 1, w + 2, 7, PC[0]);
     const hw = ((w * max(0, f.hp)) / 100) | 0;
     const gw = ((w * max(0, f.gh)) / 100) | 0;
@@ -2998,6 +3017,7 @@ function overlay() {
   }
   for (const f of FS) {
     const o = FS[1 - f.i];
+    if (!f.cpu && ((f.fall === 1 && f.y > -3) || f.hang) && P(f.x, 1.4, f.z)) txt(f.hang ? '5 · SUBIR' : '5 · ¡AGÁRRATE!', _x, _y, blink ? PC[17] : PC[9], 1, 2, 0.5);
     if (!f.cpu && o.tn && o.stun > 0 && hypot(o.x - f.x, o.z - f.z) < 2.6 && P(o.x, o.y + 2.6, o.z)) {
       txt('¡REMATE!', _x, _y - 12, blink ? PC[17] : PC[14], 1, 2, 0.5);
       txt('1 ESPADA · 2 ESCUDO · 4 HECHIZO', _x, _y, PC[9], 1, 1, 0.5);
