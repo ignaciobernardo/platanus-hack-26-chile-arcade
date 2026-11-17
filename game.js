@@ -1241,7 +1241,6 @@ const SFX = {
   },
   jump: () => noise(0.14, 0.12, 500, 'b', 0, 1500),
   roll: () => noise(0.3, 0.22, 1400, 'b', 0, 300),
-  dodge: () => tone(1320, 0.18, 's', 0.06, 1980),
   charge: () => tone(180, 0.7, 'w', 0.035, 620),
   full: () => {
     tone(1760, 0.35, 't', 0.08);
@@ -1289,7 +1288,7 @@ const SFX = {
     tone(220, 1.2, 'w', 0.15, 50);
     SFX.boom(0.8);
   },
-  gong: () => [98, 147, 196, 294].forEach((f) => tone(f, 2.6, 's', 0.11, f * 0.995)),
+  gong: () => [98, 147, 196].forEach((f) => tone(f, 2.6, 's', 0.11)),
   fall: () => tone(900, 1.3, 's', 0.1, 120),
   ui: () => tone(880, 0.07, 'q', 0.06),
 };
@@ -1376,7 +1375,7 @@ function mkF(i) {
     i, x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, kx: 0, kz: 0, face: 0, hp: 100, gh: 100, gt: 0, mana: 1, sp: 0,
     item: 0, act: 0, at: 0, cmb: 0, q: 0, hd: 0, blk: 0, stun: 0, frz: 0, burn: 0, bt: 0, slow: 0,
     hs: 0, inv: 0, fl: 0, fall: 0, ko: 0, kod: 0, wk: 0, mv: 0, trail: [], w: 0, pw: 0, pf: 0, spin: 0, rl: 0,
-    rb: 0, rx: 0, rz: 0, bst: 9, pbc: 0, gb: 0, dg: 0, aid: 0, pa: -1, plan: 0, hold: 0, tn: 0, kd: 0, hang: 0,
+    rb: 0, rx: 0, rz: 0, ds: 0, bst: 9, pbc: 0, gb: 0, dg: 0, aid: 0, pa: -1, plan: 0, hold: 0, tn: 0, kd: 0, hang: 0,
     Q: pz('UTWI]JSUEOOPPO'),
     bq: 0, bqt: 0, cpu: 0, ct: 0, side: 1, skl: 0.6, lag: 1, ci: { mx: 0, mz: 0, p: [], blk: 0, hu: 0 },
   };
@@ -1465,7 +1464,7 @@ function dodged(f) {
   if (f.dg > 0) return;
   f.dg = 0.5;
   ftxt(f.x, 2.3, f.z, '¡ESQUIVA!', PC[8]);
-  SFX.dodge();
+  SFX.pick();
 }
 
 function cpuIn(f, o, dt) {
@@ -1486,6 +1485,7 @@ function cpuIn(f, o, dt) {
   const d = hypot(dx, dz) || 1;
   const ux = dx / d;
   const uz = dz / d;
+  if (f.act === 7 && d > 2.4 && d < 6 && rnd() < 0.05) I.p[3] = 1;
   if (o.tn && o.stun > 0.15 && d < 2.6) {
     I.p[[1, 2, 4][(rnd() * 3) | 0]] = 1;
     return I;
@@ -1858,7 +1858,6 @@ function upF(f, o, I, dt) {
       if (phase === 'fight') {
         f.hp -= 3;
         f.gt = 0.5;
-        ftxt(f.x, 2.2, f.z, 3, PC[16]);
         noise(0.12, 0.12, 900);
         if (f.hp <= 0) ko(f, 'K.O.');
       }
@@ -1975,23 +1974,31 @@ function upF(f, o, I, dt) {
           if (f.tip) burst(f.tip[0], f.tip[1], f.tip[2], 16, 3, 0.4, 0.06, 0xfff0c0, 1);
         }
         if (f.tip && rnd() < 0.6) part(f.tip[0], f.tip[1], f.tip[2], rr(-1, 1), rr(0, 1.5), rr(-1, 1), 0.3, 0.05, f.pf ? 0xfff0c0 : 0x9fb8ff, 1);
-        if (!I.hu || t > 2) {
+        if (!I.hu || t > 2 || I.p[3]) {
+          // soltar: giro cargado; con 3 mientras carga: torbellino en carrera
+          f.ds = I.p[3];
+          f.rx = I.mx || sin(f.face);
+          f.rz = I.mx || I.mz ? I.mz : cos(f.face);
           f.act = 8;
           f.at = 0;
           f.hd = 0;
+          f.bqt = 0;
           f.aid++;
           f.trail = [];
           SFX.heavy();
+          if (f.ds) ftxt(f.x, 2.6, f.z, '¡TORBELLINO!', PC[14]);
         }
       } else if (a === 8) {
-        f.spin = TAU * ease(cl((t - 0.03) / 0.27, 0, 1));
-        if (t > 0.05 && t < 0.3 && !f.hd && !o.ko && hypot(o.x - f.x, o.z - f.z) < 2.4) {
+        const ds = f.ds;
+        f.spin = TAU * (1 + ds) * ease(cl((t - 0.03) / (0.27 + ds * 0.08), 0, 1));
+        if (t > 0.05 && t < 0.3 + ds * 0.08 && !f.hd && !o.ko && hypot(o.x - f.x, o.z - f.z) < 2.4) {
           f.hd = 1;
           const p = f.pw;
           if (o.y > 0.5) dodged(o);
-          else hurt(o, f.x, f.z, 9 + 12 * p, 8 + 9 * p, 0.45, 8 | 16 | 4 | (p >= 1 ? 32 : 0), f);
+          else hurt(o, f.x, f.z, ds ? 21 : 9 + 12 * p, ds ? 10 : 8 + 9 * p, 0.45, 8 | 16 | 4 | (p >= 1 ? 32 : 0), f);
         }
-        if (t > 0.55) f.act = 0;
+        // tras el torbellino queda expuesto con la espada en alto
+        if (t > (ds ? 1 : 0.55)) f.act = 0;
       } else if (a === 2) {
         f.rl = (f.rb ? -TAU : TAU) * ease(cl(t / 0.4, 0, 1));
         if (t > 0.48) f.act = 0;
@@ -2070,6 +2077,10 @@ function upF(f, o, I, dt) {
   const ac = 1 - exp(-(onG ? 30 : 5) * dt);
   f.vx += (I.mx * sp - f.vx) * ac;
   f.vz += (I.mz * sp - f.vz) * ac;
+  if (f.act === 8 && f.ds && f.at < 0.36) {
+    f.vx = f.rx * 12;
+    f.vz = f.rz * 12;
+  }
   if (f.act === 2) {
     const v = (f.at < 0.28 ? 10.5 : f.at < 0.42 ? mix(10.5, 0, (f.at - 0.28) / 0.14) : 0) * sl;
     f.vx = f.rx * v;
@@ -2169,7 +2180,7 @@ function upF(f, o, I, dt) {
     A = [0.42, 0.55, -0.3, 2.5, 0.35 + p * 0.3, -0.25, 0.35, 0.3, -0.2, 0, 0.7, 0.1, 0.12 + p * 0.1, 0];
   } else if (f.act === 8) {
     fast = 1;
-    A = pz('[YTqNFWP,OORQO');
+    A = f.ds && t > 0.36 ? pz('SiROuGQQ1OOMOK') : pz('[YTqNFWP,OORQO');
   } else if (f.act === 2) A = pz('SSUcGJSTEOOTWW');
   else if (f.act === 3) A = pz('RZ]ORHYWJ@OQQO');
   else if (f.act === 4) {
@@ -2906,13 +2917,6 @@ function render() {
       }
   }
   // rayos y marcas
-  for (const l of LM) {
-    if ((T * 10) & 1)
-      for (let i = 0; i < 16; i++) {
-        const a = (i / 16) * TAU;
-        if (P(l.x + cos(a) * 1.3, 0.05, l.z + sin(a) * 1.3)) dot(_x, _y, _z + 0.05, 1.5, 0xfff080, 1);
-      }
-  }
   for (const b of BOLT)
     for (let i = 0; i + 1 < b.pts.length; i++) {
       const [x0, y0, z0] = b.pts[i];
@@ -2948,7 +2952,7 @@ function render() {
 const CTL = [
   ['ATACAR', 'MANTÉN: CARGA'],
   ['ESCUDO', 'A TIEMPO: PARADA'],
-  ['RODAR', 'ESQUIVA TODO'],
+  ['RODAR', 'CARGANDO: TORBELLINO'],
   ['HECHIZO', 'HIELO FUEGO LENTO'],
   ['SALTAR', '+1: EN PICADA'],
   ['OBJETO', 'CAEN DEL CIELO'],
@@ -2960,18 +2964,18 @@ function overlay() {
   const blink = (T * 2.2) & 1;
   if (mode === 'title') {
     // degradado tramado hacia abajo para que el menú se lea sobre la pelea de fondo
-    for (let y = 128; y < FH; y++) for (let x = 0; x < FW; x++) if (BAY[((y & 3) << 2) | (x & 3)] < (y - 128) / 11) O32[y * FW + x] = PC[1];
+    for (let y = 128; y < FH; y++) for (let x = 0; x < FW; x++) if (BAY[((y & 3) << 2) | (x & 3)] < (y - 120) / 4) O32[y * FW + x] = PC[1];
     txt('PENITENTES', FW / 2, 32, PC[14], 4, 9, 0.5);
     txt('DUELO EN LA ALTA CORDILLERA', FW / 2, 86, PC[8], 1, 2, 0.5);
     ['UN JUGADOR', 'DOS JUGADORES'].forEach((s, i) => {
       const on = MSEL === i;
-      txt(s, FW / 2, 140 + i * 18, on ? PC[14] : PC[5], 2, 2, 0.5);
+      txt(s, FW / 2, 140 + i * 18, on ? PC[14] : PC[7], 2, 2, 0.5);
       if (on && blink) {
         txt('>', FW / 2 - s.length * 4 - 12, 140 + i * 18, PC[14], 2, 2);
         txt('<', FW / 2 + s.length * 4 + 6, 140 + i * 18, PC[14], 2, 2);
       }
     });
-    txt('STICK Y BOTÓN 1 O START', FW / 2, 180, PC[5], 1, 1, 0.5);
+    txt('STICK Y BOTÓN 1 O START', FW / 2, 180, PC[8], 1, 1, 0.5);
     // los seis botones como en el gabinete
     CTL.forEach(([a, b], i) => {
       const x = 26 + (i % 3) * 128;
@@ -2979,7 +2983,7 @@ function overlay() {
       for (let j = -5; j <= 5; j++) for (let k = -5; k <= 5; k++) if (j * j + k * k < 28) O32[(y + 5 + j) * FW + x + k] = PC[13];
       txt(i + 1, x, y + 3, PC[1], 1, 1, 0.5, 0);
       txt(a, x + 9, y, PC[9], 1, 2);
-      txt(b, x + 9, y + 12, PC[6], 1, 1);
+      txt(b, x + 9, y + 12, PC[8], 1, 1);
     });
     if (best) txt('RÉCORD CONTRA LA MÁQUINA · ' + best, FW / 2, FH - 15, PC[13], 1, 1, 0.5);
     return;
