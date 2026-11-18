@@ -753,7 +753,7 @@ function genObstacles(seed) {
     if (hypot(x + 5.5, z) < 2.8 || hypot(x - 5.5, z) < 2.8 || hypot(x, z) < 1.8) continue;
     if (OB.some((o) => hypot(o.x - x, o.z - z) < o.r + R + 2.3)) continue;
     if (r + R > rad(a) - 1.3) continue;
-    OB.push({ x, z, r: R, h: k ? 0.55 + sr() * 0.2 : 2.2, k, hp: 4, al: 1 });
+    OB.push({ x, z, r: R, h: k ? 0.55 + sr() * 0.2 : 2.2, k, al: 1 });
   }
   const m = mesh();
   OB.forEach((o, g) => {
@@ -970,49 +970,15 @@ function glow(x, z, r, c, y = 0.02) {
     ok = v;
   }
 }
-// Línea 3D aditiva (rayos, estelas)
-function line3(x0, y0, z0, x1, y1, z1, c, s) {
-  if (!P(x0, y0, z0)) return;
-  const ax = _x;
-  const ay = _y;
-  const az = _z;
-  if (!P(x1, y1, z1)) return;
-  const n = max(1, ceil(max(abs(_x - ax), abs(_y - ay))));
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    dot(mix(ax, _x, t), mix(ay, _y, t), mix(az, _z, t) + 0.05, s, c, 1);
-  }
-}
-
 // --- Partículas ---
 
 const MP = 1500;
-const QX = new Float32Array(MP);
-const QY = new Float32Array(MP);
-const QZ = new Float32Array(MP);
-const QVX = new Float32Array(MP);
-const QVY = new Float32Array(MP);
-const QVZ = new Float32Array(MP);
-const QL = new Float32Array(MP);
-const QM = new Float32Array(MP);
-const QS = new Float32Array(MP);
-const QC = new Int32Array(MP);
-const QF = new Uint8Array(MP);
+// partículas en un solo arreglo: x y z vx vy vz vida vidaMax tamaño color banderas
+const QQ = new Float32Array(MP * 11);
 let qn = 0;
-// fl: 1 aditiva, 2 gravedad, 4 roce, 8 choca con el suelo, 16 crece, 32 trama (humo)
+// fl: 1 aditiva, 2 gravedad, 4 roce, 8 choca con el suelo, 16 crece
 function part(x, y, z, vx, vy, vz, l, s, c, fl) {
-  if (qn >= MP) return;
-  const i = qn++;
-  QX[i] = x;
-  QY[i] = y;
-  QZ[i] = z;
-  QVX[i] = vx;
-  QVY[i] = vy;
-  QVZ[i] = vz;
-  QL[i] = QM[i] = l;
-  QS[i] = s;
-  QC[i] = c;
-  QF[i] = fl;
+  if (qn < MP) QQ.set([x, y, z, vx, vy, vz, l, l, s, c, fl], 11 * qn++);
 }
 function burst(x, y, z, n, sp, l, s, c, fl, up = 0) {
   for (let i = 0; i < n; i++) {
@@ -1024,51 +990,32 @@ function burst(x, y, z, n, sp, l, s, c, fl, up = 0) {
 }
 function stepParts(dt) {
   for (let i = 0; i < qn; i++) {
-    QL[i] -= dt;
-    if (QL[i] <= 0) {
-      const j = --qn;
-      QX[i] = QX[j];
-      QY[i] = QY[j];
-      QZ[i] = QZ[j];
-      QVX[i] = QVX[j];
-      QVY[i] = QVY[j];
-      QVZ[i] = QVZ[j];
-      QL[i] = QL[j];
-      QM[i] = QM[j];
-      QS[i] = QS[j];
-      QC[i] = QC[j];
-      QF[i] = QF[j];
+    const o = i * 11;
+    if ((QQ[o + 6] -= dt) <= 0) {
+      QQ.copyWithin(o, --qn * 11, qn * 11 + 11);
       i--;
       continue;
     }
-    const f = QF[i];
-    if (f & 2) QVY[i] -= 14 * dt;
-    if (f & 4) {
-      const k = exp(-3 * dt);
-      QVX[i] *= k;
-      QVY[i] *= k;
-      QVZ[i] *= k;
-    }
-    QX[i] += QVX[i] * dt;
-    QY[i] += QVY[i] * dt;
-    QZ[i] += QVZ[i] * dt;
-    if (f & 8 && QY[i] < 0 && onPlat(QX[i], QZ[i])) {
-      QY[i] = 0;
-      QVY[i] *= -0.25;
-      QVX[i] *= 0.5;
-      QVZ[i] *= 0.5;
+    const f = QQ[o + 10];
+    if (f & 2) QQ[o + 4] -= 14 * dt;
+    if (f & 4) for (let k = 3; k < 6; k++) QQ[o + k] *= exp(-3 * dt);
+    for (let k = 0; k < 3; k++) QQ[o + k] += QQ[o + k + 3] * dt;
+    if (f & 8 && QQ[o + 1] < 0 && onPlat(QQ[o], QQ[o + 2])) {
+      QQ[o + 1] = 0;
+      QQ[o + 4] *= -0.25;
+      QQ[o + 3] *= 0.5;
+      QQ[o + 5] *= 0.5;
     }
   }
 }
 function drawParts() {
   for (let i = 0; i < qn; i++) {
-    if (!P(QX[i], QY[i], QZ[i])) continue;
-    const f = QF[i];
-    const k = QL[i] / QM[i];
-    const s = min(40, QS[i] * F * _z * (f & 16 ? 2 - k : 1));
-    if (s < 0.4) continue;
-    if (f & 1) dot(_x, _y, _z + 0.02, max(1, s), sc3(QC[i], k), 1);
-    else dot(_x, _y, _z, max(1, s), fogc(QC[i], _d), 0);
+    const o = i * 11;
+    if (!P(QQ[o], QQ[o + 1], QQ[o + 2])) continue;
+    const f = QQ[o + 10];
+    const k = QQ[o + 6] / QQ[o + 7];
+    const s = max(1, min(40, QQ[o + 8] * F * _z * (f & 16 ? 2 - k : 1)));
+    dot(_x, _y, _z + 0.02, s, f & 1 ? sc3(QQ[o + 9], k) : fogc(QQ[o + 9], _d), f & 1);
   }
 }
 
@@ -1272,13 +1219,7 @@ const SFX = {
     noise(1, 0.9 * v, 520, 'l', 0, 120);
     tone(75, 0.9, 's', 0.7 * v, 28);
   },
-  thunder: () => {
-    noise(0.12, 0.6, 3000, 'h');
-    noise(1.4, 0.8, 400, 'l', 0.05, 90);
-    tone(55, 1, 's', 0.5, 30);
-  },
   gust: () => noise(0.7, 0.45, 400, 'b', 0, 2200),
-  potion: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 't', 0.09, 0, i * 0.07)),
   pick: () => {
     tone(880, 0.1, 'q', 0.06);
     tone(1320, 0.18, 'q', 0.06, 0, 0.07);
@@ -1332,9 +1273,9 @@ const DK = 0x2a2e42;
 const SPC = [0x8ff0ff, 0xff8c32, 0xb48cff];
 const SPN = ['HIELO', 'FUEGO', 'LENTO'];
 const SPI = [PC[19], PC[16], PC[21]];
-const ITN = ['', 'POCIÓN', 'BOMBA', 'RAYO', 'VENDAVAL'];
-const ITC = [0, 0xff6f8a, 0x30303c, 0xffe060, 0xf2f4ff];
-const ITI = [0, PC[13], PC[15], PC[17], PC[9]];
+const ITN = ['', 'POCIÓN', 'BOMBA', 'VENDAVAL'];
+const ITC = [0, 0xff6f8a, 0x30303c, 0xf2f4ff];
+const ITI = [0, PC[13], PC[15], PC[9]];
 
 let phase = 'boot';
 let mode = 'title';
@@ -1358,10 +1299,7 @@ let FS = [];
 let PJ = [];
 let IT = [];
 let BM = [];
-let LM = [];
 let FP = [];
-let SF = [];
-let BOLT = [];
 let FT = [];
 let LT = [];
 let itT = 4;
@@ -1420,10 +1358,7 @@ function newRound() {
   PJ = [];
   IT = [];
   BM = [];
-  LM = [];
   FP = [];
-  SF = [];
-  BOLT = [];
   FT = [];
   qn = 0;
   itT = 3.5;
@@ -1514,7 +1449,7 @@ function cpuIn(f, o, dt) {
   f.ct = rr(0.09, 0.2) * f.lag;
   I.blk = 0;
   const inc = PJ.find((p) => p.o !== f.i && hypot(p.x - f.x, p.z - f.z) < 5 && p.vx * (f.x - p.x) + p.vz * (f.z - p.z) > 0);
-  const flee = BM.some((b) => hypot(b.tx - f.x, b.tz - f.z) < 3) || LM.some((l) => hypot(l.x - f.x, l.z - f.z) < 1.8);
+  const flee = BM.some((b) => hypot(b.tx - f.x, b.tz - f.z) < 3);
   if (flee) I.p[3] = rnd() < 0.3;
   else if (inc && rnd() < f.skl) {
     const r = rnd();
@@ -1736,7 +1671,7 @@ function useItem(f, o) {
     f.hp = min(100, f.hp + 30);
     burst(f.x, 1, f.z, 30, 2.5, 1, 0.07, 0xffb0a0, 1, 2);
     ftxt(f.x, 2.4, f.z, '+30', PC[13]);
-    SFX.potion();
+    SFX.full();
   } else if (it === 2) {
     let tx = o.x + o.vx * 0.5;
     let tz = o.z + o.vz * 0.5;
@@ -1749,9 +1684,6 @@ function useItem(f, o) {
     BM.push({ x: f.x, y: f.y + 1.6, z: f.z, vx: (tx - f.x) / Tf, vz: (tz - f.z) / Tf, vy: (-1.6 + 0.5 * 20 * Tf * Tf) / Tf, o: f.i, tx, tz, t: 0 });
     SFX.swing();
   } else if (it === 3) {
-    LM.push({ x: o.x, z: o.z, t: 0, o: f.i, tg: o });
-    SFX.chime();
-  } else if (it === 4) {
     const a = f.face;
     for (let i = 0; i < 70; i++) {
       const b = a + rr(-0.6, 0.6);
@@ -1777,7 +1709,6 @@ function boom(x, z) {
     const d = hypot(f.x - x, f.z - z);
     if (d < 2.8 && f.y < 2.5) hurt(f, x, z, 20 * (1 - d / 4), 13, 0.5, 2 | 4);
   }
-  hitObs(x, z, 2.6, 3);
   burst(x, 0.6, z, 14, 2.5, 0.5, 0.5, 0xff8a30, 1 | 4 | 16, 1.5);
   burst(x, 0.5, z, 60, 9, 0.7, 0.12, 0xffc070, 1 | 4, 2);
   burst(x, 0.2, z, 40, 7, 1, 0.08, 0xe8ecf8, 2 | 8, 4);
@@ -1785,19 +1716,6 @@ function boom(x, z) {
   FLASH = 60;
   SHK = 0.7;
   SFX.boom();
-}
-
-function hitObs(x, z, r, dmg) {
-  OB.forEach((o) => {
-    if (!o.al || o.k || hypot(o.x - x, o.z - z) > o.r + r) return;
-    o.hp -= dmg;
-    if (o.hp <= 0) {
-      o.al = 0;
-      burst(o.x, 1.2, o.z, 70, 6, 1.4, 0.12, 0xd8e2fa, 2 | 8, 3);
-      SFX.shatter();
-      SHK = 0.35;
-    }
-  });
 }
 
 function blockedAt(x, z, y) {
@@ -2117,7 +2035,6 @@ function upF(f, o, I, dt) {
         f.kz *= -0.3;
         hurt(f, ob.x, ob.z, 6, 0, 0.45, 1);
         f.stun = max(f.stun, 0.4);
-        hitObs(ob.x, ob.z, 0.1, 2);
       }
     }
   }
@@ -2154,8 +2071,6 @@ function upF(f, o, I, dt) {
   const pwk = f.wk;
   f.wk += mvv * dt * 1.9;
   if (onG && floor(pwk / PI) !== floor(f.wk / PI) && mvv > 1 && f.act !== 2) {
-    const s = floor(f.wk / PI) & 1 ? 1 : -1;
-    stamp(f.x + cos(f.face) * 0.14 * s, f.z - sin(f.face) * 0.14 * s, 0.11, 120, 128, 168, 0.55);
     if (!f.cpu) SFX.step();
     part(f.x, 0.05, f.z, rr(-0.5, 0.5), 0.8, rr(-0.5, 0.5), 0.35, 0.06, 0xe8ecf8, 2 | 8);
   }
@@ -2543,7 +2458,7 @@ function step(dt) {
           }
         }
         if (mode === 'title') newMatch('title');
-        else (winner === 0 || mode === 'vs' ? SFX.potion : SFX.fall)();
+        else (winner === 0 || mode === 'vs' ? SFX.full : SFX.fall)();
       } else newRound();
       return;
     }
@@ -2593,11 +2508,7 @@ function step(dt) {
     const c = SPC[p.k];
     part(p.x, p.y, p.z, rr(-0.5, 0.5), rr(-0.3, 0.8), rr(-0.5, 0.5), 0.35, p.r * 0.5, c, 1 | 16);
     let end = p.t > 2.2 || hypot(p.x, p.z) > 17;
-    const ob = blockedAt(p.x, p.z, p.y);
-    if (ob) {
-      hitObs(p.x, p.z, 0.2, p.k === 1 ? 2 : 1);
-      end = 1;
-    }
+    if (blockedAt(p.x, p.z, p.y)) end = 1;
     for (const f of FS) {
       if (end || f.i === p.o || f.ko || f.fall) continue;
       if (hypot(f.x - p.x, f.z - p.z) < p.r + 0.35 && p.y > f.y - 0.2 && p.y < f.y + 1.9) {
@@ -2650,7 +2561,6 @@ function step(dt) {
         stamp(p.x, p.z, 0.9, 74, 66, 80, 0.6);
         if (onPlat(p.x, p.z)) FP.push({ x: p.x, z: p.z, t: 2.4, tk: 0 });
       }
-      if (p.k === 2 && onPlat(p.x, p.z)) SF.push({ x: p.x, z: p.z, t: 3.5 });
     }
   }
   PJ = PJ.filter((p) => !p.dead);
@@ -2668,39 +2578,6 @@ function step(dt) {
     }
   }
   BM = BM.filter((b) => !b.dead);
-  // rayos marcados
-  for (const l of LM) {
-    l.t += dt;
-    if (l.t < 0.5 && !l.tg.fall) {
-      l.x = mix(l.x, l.tg.x, 0.15);
-      l.z = mix(l.z, l.tg.z, 0.15);
-    }
-    if (l.t >= 1 && !l.dead) {
-      l.dead = 1;
-      for (const f of FS) if (f.i !== l.o && hypot(f.x - l.x, f.z - l.z) < 1.4) {
-        if (hurt(f, l.x, l.z, 20, 4, 0.7, 1) === 2) f.stun = 0.7;
-      }
-      hitObs(l.x, l.z, 1, 4);
-      const pts = [];
-      let x = l.x;
-      let z = l.z;
-      for (let y = 22; y > 0; y -= 1.4) {
-        pts.push([x, y, z]);
-        x = l.x + rr(-1.4, 1.4) * (y / 22) ** 0.7;
-        z = l.z + rr(-1.4, 1.4) * (y / 22) ** 0.7;
-      }
-      pts.push([l.x, 0, l.z]);
-      BOLT.push({ pts, t: 0.3, x: l.x, z: l.z });
-      burst(l.x, 0.3, l.z, 40, 7, 0.6, 0.08, 0xfff4b0, 1 | 2 | 4, 2);
-      stamp(l.x, l.z, 1.1, 64, 60, 76, 0.7);
-      FLASH = 34;
-      SHK = 0.5;
-      SFX.thunder();
-    }
-  }
-  LM = LM.filter((l) => !l.dead);
-  for (const b of BOLT) b.t -= dt;
-  BOLT = BOLT.filter((b) => b.t > 0);
   // fuego en el suelo y campos lentos
   for (const p of FP) {
     p.t -= dt;
@@ -2716,16 +2593,6 @@ function step(dt) {
     }
   }
   FP = FP.filter((p) => p.t > 0);
-  for (const s of SF) {
-    s.t -= dt;
-    if (rnd() < 0.5) {
-      const a = rnd() * TAU;
-      const r = rr(0, 2.2);
-      part(s.x + cos(a) * r, 0.1, s.z + sin(a) * r, 0, rr(0.3, 1), 0, 0.8, 0.06, 0x9a70ff, 1);
-    }
-    for (const f of FS) if (hypot(f.x - s.x, f.z - s.z) < 2.2 && f.y < 0.6) f.slow = max(f.slow, 0.5);
-  }
-  SF = SF.filter((s) => s.t > 0);
   // objetos que caen del cielo
   if (phase === 'fight') {
     itT -= dt;
@@ -2737,7 +2604,7 @@ function step(dt) {
         const x = cos(a) * r;
         const z = sin(a) * r;
         if (OB.some((o) => o.al && hypot(o.x - x, o.z - z) < o.r + 0.9)) continue;
-        IT.push({ x, z, y: 16, vy: 0, k: 1 + ((rnd() * 4) | 0), st: 0, t: 0 });
+        IT.push({ x, z, y: 16, vy: 0, k: 1 + ((rnd() * 3) | 0), st: 0, t: 0 });
         SFX.chime();
         break;
       }
@@ -2860,10 +2727,7 @@ function render() {
   // luces sobre la nieve
   for (const p of PJ) glow(p.x, p.z, p.k === 2 ? 2.4 : 1.8, sc3(SPC[p.k], 0.5));
   for (const p of FP) glow(p.x, p.z, 1.8, sc3(0xff7020, 0.4 + 0.1 * sin(T * 30 + p.x)));
-  for (const s of SF) glow(s.x, s.z, 2.4, sc3(0x7a50ff, 0.32 * min(1, s.t)));
   for (const t of IT) if (t.st === 2) glow(t.x, t.z, 0.9, sc3(ITC[t.k] === 0x30303c ? 0xff9040 : ITC[t.k], 0.35));
-  for (const l of LM) glow(l.x, l.z, 1.4, sc3(0xfff080, ((T * 8) & 1 ? 0.5 : 0.25) * (0.4 + l.t)));
-  for (const b of BOLT) glow(b.x, b.z, 3.2, sc3(0xfff0c0, b.t * 1.6));
   for (const f of FS) {
     if (f.burn > 0 && !f.fall) glow(f.x, f.z, 1.6, sc3(0xff7020, 0.3));
     if (f.act === 3 || f.act === 7) glow(f.x, f.z, 1.4, f.act === 3 ? sc3(SPC[f.sp], 0.3) : sc3(f.pw >= 1 ? 0xfff0c0 : 0x9fb8ff, 0.12 + f.pw * 0.2));
@@ -2915,14 +2779,6 @@ function render() {
         if (P(f.x + cos(a) * 0.35, f.y + 2.25, f.z + sin(a) * 0.35)) dot(_x, _y, _z, 2, 0xfff0b0, 1);
       }
   }
-  // rayos y marcas
-  for (const b of BOLT)
-    for (let i = 0; i + 1 < b.pts.length; i++) {
-      const [x0, y0, z0] = b.pts[i];
-      const [x1, y1, z1] = b.pts[i + 1];
-      line3(x0, y0, z0, x1, y1, z1, sc3(0xfff6d0, min(1, b.t * 5)), 3);
-      line3(x0, y0, z0, x1, y1, z1, 0xffffff, 1);
-    }
   // columnas de luz donde va a caer un objeto
   for (const t of IT) {
     if (t.st === 2) continue;
@@ -2972,7 +2828,6 @@ function overlay() {
         txt('<', FW / 2 + s.length * 4 + 6, 140 + i * 18, PC[14], 2, 2);
       }
     });
-    txt('STICK Y BOTÓN 1 O START', FW / 2, 180, PC[8], 1, 1, 0.5);
     // los seis botones como en el gabinete
     CTL.forEach(([a, b], i) => {
       const x = 26 + (i % 3) * 128;
@@ -3036,11 +2891,11 @@ function overlay() {
 // --- Carga: el mundo se genera de verdad mientras se ve el progreso ---
 
 const TASKS = [];
-TASKS.push(['PALETA', () => buildLut()]);
-for (let i = 0; i < 32; i++) TASKS.push(['NIEVE', () => genSnow(i * 32, i * 32 + 32)]);
-for (let i = 0; i < 8; i++) TASKS.push(['NUBES', () => genCloud(i * 32, i * 32 + 32)]);
-TASKS.push(['NUBES', shadeCloud]);
-TASKS.push(['ACANTILADOS', buildWalls]);
+TASKS.push([0, buildLut]);
+for (let i = 0; i < 32; i++) TASKS.push([0, () => genSnow(i * 32, i * 32 + 32)]);
+for (let i = 0; i < 8; i++) TASKS.push([0, () => genCloud(i * 32, i * 32 + 32)]);
+TASKS.push([0, shadeCloud]);
+TASKS.push([0, buildWalls]);
 let ti = 0;
 let BT0 = 0;
 function bootStep() {
@@ -3053,8 +2908,6 @@ function bootStep() {
     txt('PENITENTES', FW / 2, 118, PC[13], 2, 5, 0.5);
     fill(FW / 2 - 80, 160, 160, 2, PC[2]);
     fill(FW / 2 - 80, 160, (160 * p) | 0, 2, PC[13]);
-    const lab = ti < TASKS.length ? TASKS[ti][0] : 'LISTO';
-    txt(lab, FW / 2, 168, PC[6], 1, 1, 0.5);
   }
   if (ti >= TASKS.length) {
     phase = 'title';
